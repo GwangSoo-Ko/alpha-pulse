@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alphapulse"
+version = "1.0.0"
+description = "AI 기반 투자 인텔리전스 플랫폼"
+requires-python = ">=3.11"
+dependencies = [
+    # KMP dependencies
+    "pykrx>=1.0.45",
+    "finance-datareader>=0.9.90",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "fredapi>=0.5",
+    "click>=8.1",
+    "rich>=13.0",
+    "jinja2>=3.1",
+    "matplotlib>=3.7",
+    # BlogPulse dependencies
+    "feedparser>=6.0",
+    "crawl4ai>=0.4.0",
+    "httpx>=0.27",
+    "certifi>=2024.0",
+    "telethon>=1.36",
+    "google-adk~=1.27.2",
+    # Shared
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+ap = "alphapulse.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["alphapulse*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
