@@ -542,7 +542,7 @@ def get_pulse_history(days: int = 7) -> list[dict]:
 | **웹 크롤링** | crawl4ai >= 0.4.0 | BlogPulse | 브라우저 크롤링 |
 | **RSS** | feedparser >= 6.0 | BlogPulse | |
 | **텔레그램 사용자 API** | telethon >= 1.36 | BlogPulse | 채널 모니터 |
-| **AI 에이전트** | google-adk >= 1.0.0 | BlogPulse | 멀티에이전트 |
+| **AI 에이전트** | google-adk ~= 1.27.2 | BlogPulse | 멀티에이전트 (1.27.0 yanked 주의) |
 | **터미널 UI** | rich >= 13.0 | KMP | |
 | **HTML 리포트** | jinja2 >= 3.1, matplotlib >= 3.7 | KMP | |
 | **환경 변수** | python-dotenv >= 1.0 | 공통 | |

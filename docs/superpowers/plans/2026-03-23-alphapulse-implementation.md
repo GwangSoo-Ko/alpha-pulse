@@ -166,7 +166,7 @@ dependencies = [
     "httpx>=0.27",
     "certifi>=2024.0",
     "telethon>=1.36",
-    "google-adk~=1.0.0",  # 호환 릴리즈 고정 (PRD 제약: 버전 변경 잦음)
+    "google-adk~=1.27.2",  # 호환 릴리즈 고정 (1.27.x 허용, 1.27.0 yanked 주의)
     # Shared
     "python-dotenv>=1.0",
 ]
