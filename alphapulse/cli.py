@@ -159,6 +159,53 @@ def content():
     pass
 
 
+@content.command("monitor")
+@click.option("--daemon", is_flag=True, help="데몬 모드")
+@click.option("--interval", type=int, default=None, help="체크 주기 (초)")
+@click.option("--force-latest", type=int, default=0, help="최근 N개 강제 처리")
+@click.option("--no-telegram", is_flag=True, help="텔레그램 전송 안 함")
+@click.option("--blog-only", is_flag=True, help="블로그만 모니터링")
+@click.option("--channel-only", is_flag=True, help="채널만 모니터링")
+def content_monitor(daemon, interval, force_latest, no_telegram, blog_only, channel_only):
+    """블로그/채널 콘텐츠 모니터링."""
+    import asyncio
+    from alphapulse.content.monitor import BlogMonitor
+    from alphapulse.core.config import Config
+    cfg = Config()
+    monitor = BlogMonitor()
+    if daemon:
+        asyncio.run(monitor.run_daemon(
+            interval=interval or cfg.CHECK_INTERVAL,
+            send_telegram=not no_telegram,
+        ))
+    else:
+        asyncio.run(monitor.run_once(
+            force_latest=force_latest,
+            send_telegram=not no_telegram,
+        ))
+
+
+@content.command("test-telegram")
+def content_test_telegram():
+    """텔레그램 연결 테스트."""
+    import asyncio
+    from alphapulse.core.notifier import TelegramNotifier
+    notifier = TelegramNotifier()
+    asyncio.run(notifier.send_test())
+
+
+@content.command("list-channels")
+def content_list_channels():
+    """구독 텔레그램 채널 목록."""
+    from alphapulse.core.config import Config
+    cfg = Config()
+    if cfg.CHANNEL_IDS:
+        for ch in cfg.CHANNEL_IDS:
+            click.echo(f"  - {ch}")
+    else:
+        click.echo("구독 중인 채널이 없습니다. CHANNEL_IDS 환경변수를 설정하세요.")
+
+
 @cli.command()
 @click.option("--no-telegram", is_flag=True, help="텔레그램 전송 안 함")
 @click.option("--daemon", is_flag=True, help="데몬 모드 (매일 자동 실행)")
