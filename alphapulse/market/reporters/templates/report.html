@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K-Market Pulse Report — {{ date_formatted }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 0.5rem; color: #f8fafc; }
+        .subtitle { text-align: center; color: #94a3b8; margin-bottom: 2rem; }
+
+        .score-card {
+            text-align: center; padding: 2rem; border-radius: 12px; margin-bottom: 2rem;
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            border: 2px solid {{ score_border_color }};
+        }
+        .score-value { font-size: 3rem; font-weight: bold; color: {{ score_color }}; }
+        .score-label { font-size: 1.2rem; color: {{ score_color }}; margin-top: 0.5rem; }
+
+        table { width: 100%; border-collapse: collapse; margin-bottom: 2rem; }
+        th { background: #1e293b; padding: 0.75rem; text-align: left; color: #94a3b8; font-weight: 600; }
+        td { padding: 0.75rem; border-bottom: 1px solid #334155; }
+        tr:hover { background: #1e293b; }
+
+        .score-positive { color: #4ade80; }
+        .score-negative { color: #f87171; }
+        .score-neutral { color: #fbbf24; }
+        .score-na { color: #64748b; }
+
+        .bar-container { width: 150px; height: 12px; background: #334155; border-radius: 6px; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .bar-fill { height: 100%; border-radius: 6px; }
+
+        .section { margin-bottom: 2rem; }
+        .section h2 { color: #38bdf8; margin-bottom: 1rem; font-size: 1.1rem; }
+
+        .chart-img { text-align: center; margin: 1rem 0; }
+        .chart-img img { max-width: 100%; border-radius: 8px; }
+
+        .footer { text-align: center; color: #64748b; font-size: 0.8rem; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #334155; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>K-Market Pulse</h1>
+    <p class="subtitle">{{ date_formatted }} | {{ period }}</p>
+
+    <div class="score-card">
+        <div class="score-value">{{ score }}</div>
+        <div class="score-label">{{ signal }}</div>
+    </div>
+
+    <div class="section">
+        <h2>지표별 분석 결과</h2>
+        <table>
+            <thead>
+                <tr><th>지표</th><th>가중치</th><th>점수</th><th>시각화</th><th>상세</th></tr>
+            </thead>
+            <tbody>
+            {% for item in indicators %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.weight }}</td>
+                    <td class="{{ item.score_class }}">{{ item.score_display }}</td>
+                    <td>
+                        <div class="bar-container">
+                            <div class="bar-fill" style="width: {{ item.bar_width }}%; background: {{ item.bar_color }};"></div>
+                        </div>
+                    </td>
+                    <td>{{ item.details }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if chart_base64 %}
+    <div class="section">
+        <h2>지표 차트</h2>
+        <div class="chart-img">
+            <img src="data:image/png;base64,{{ chart_base64 }}" alt="Indicator Chart">
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="footer">
+        <p>K-Market Pulse v1.0 | 본 리포트는 투자 참고 자료이며 매매 신호가 아닙니다.</p>
+    </div>
+</div>
+</body>
+</html>
