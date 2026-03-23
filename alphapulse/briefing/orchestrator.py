@@ -69,18 +69,41 @@ class BriefingOrchestrator:
         # [1] 정량 분석 (sync — thread에서 실행)
         logger.info("정량 분석 실행 중...")
         pulse_result = await asyncio.to_thread(self.run_quantitative, date)
+
         # [2] 최근 정성 분석 수집
         logger.info("최근 정성 분석 수집 중...")
         content_summaries = self.collect_recent_content(hours=24)
+
         # [3] AI Commentary (Phase 5에서 연결)
         commentary = None
-        # [4] Synthesis (Phase 5에서 연결)
         synthesis = None
+
+        # [4] Format
+        from alphapulse.briefing.formatter import BriefingFormatter
+        formatter = BriefingFormatter()
+        quant_msg = formatter.format_quantitative(pulse_result)
+        synth_msg = formatter.format_synthesis(pulse_result, content_summaries, commentary)
+
+        # [5] Send via Telegram (async, 단일 이벤트 루프 내)
+        if send_telegram:
+            from alphapulse.core.notifier import TelegramNotifier
+            notifier = TelegramNotifier()
+            await notifier._send_message(quant_msg)
+            await notifier._send_message(synth_msg)
+
+        # [6] Save history
+        self.history.save(
+            pulse_result["date"], pulse_result["score"],
+            pulse_result["signal"], pulse_result.get("details", {})
+        )
+
         return {
             "pulse_result": pulse_result,
             "content_summaries": content_summaries,
             "commentary": commentary,
             "synthesis": synthesis,
+            "quant_msg": quant_msg,
+            "synth_msg": synth_msg,
             "generated_at": datetime.now().isoformat(),
         }
 

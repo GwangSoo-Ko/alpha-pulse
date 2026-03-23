@@ -213,7 +213,16 @@ def content_list_channels():
 @click.option("--date", default=None, help="날짜 (YYYY-MM-DD)")
 def briefing(no_telegram, daemon, briefing_time, date):
     """일일 종합 브리핑 생성 + 전송."""
-    click.echo("Briefing not yet implemented")
+    from alphapulse.briefing.orchestrator import BriefingOrchestrator
+    orch = BriefingOrchestrator()
+    if daemon:
+        from alphapulse.briefing.scheduler import run_scheduler
+        run_scheduler(orch, briefing_time=briefing_time, send_telegram=not no_telegram)
+    else:
+        result = orch.run(date=date, send_telegram=not no_telegram)
+        score = result['pulse_result']['score']
+        signal = result['pulse_result']['signal']
+        click.echo(f"브리핑 완료: Score {score:+.0f} ({signal})")
 
 
 @cli.command()
