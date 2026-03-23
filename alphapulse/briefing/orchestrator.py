@@ -74,9 +74,24 @@ class BriefingOrchestrator:
         logger.info("최근 정성 분석 수집 중...")
         content_summaries = self.collect_recent_content(hours=24)
 
-        # [3] AI Commentary (Phase 5에서 연결)
+        # [3] AI Commentary + SeniorSynthesis (async, 같은 이벤트 루프 내)
         commentary = None
+        try:
+            from alphapulse.agents.commentary import MarketCommentaryAgent
+            agent = MarketCommentaryAgent()
+            commentary = await agent.generate(pulse_result, content_summaries)
+            logger.info("AI Commentary 생성 완료")
+        except Exception as e:
+            logger.warning(f"AI Commentary 생성 실패, 스킵: {e}")
+
         synthesis = None
+        try:
+            from alphapulse.agents.synthesis import SeniorSynthesisAgent
+            synth_agent = SeniorSynthesisAgent()
+            synthesis = await synth_agent.synthesize(pulse_result, content_summaries, commentary)
+            logger.info("종합 판단 생성 완료")
+        except Exception as e:
+            logger.warning(f"종합 판단 생성 실패, 스킵: {e}")
 
         # [4] Format
         from alphapulse.briefing.formatter import BriefingFormatter

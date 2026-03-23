@@ -229,7 +229,20 @@ def briefing(no_telegram, daemon, briefing_time, date):
 @click.option("--date", default=None, help="날짜 (YYYY-MM-DD)")
 def commentary(date):
     """AI 시장 해설 생성."""
-    click.echo("Commentary not yet implemented")
+    import asyncio
+    from alphapulse.market.engine.signal_engine import SignalEngine
+    from alphapulse.agents.commentary import MarketCommentaryAgent
+    from alphapulse.briefing.orchestrator import BriefingOrchestrator
+
+    engine = SignalEngine()
+    pulse_result = engine.run(date)
+
+    orch = BriefingOrchestrator()
+    content_summaries = orch.collect_recent_content(hours=24)
+
+    agent = MarketCommentaryAgent()
+    result = asyncio.run(agent.generate(pulse_result, content_summaries))
+    click.echo(result)
 
 
 @cli.group()
