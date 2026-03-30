@@ -59,6 +59,10 @@ class BlogCrawler:
                             "method": method,
                             "category": category,
                         }
+                    elif result.success:
+                        # 크롤링은 성공했지만 본문이 부족 → 이 URL은 재시도해도 같은 결과
+                        logger.info(f"본문 부족 ({len(result.markdown.raw_markdown if result.markdown else '')}자), 다음 URL로 전환")
+                        return None
             except Exception as e:
                 logger.warning(f"크롤링 시도 {attempt + 1}/{self.max_retries} 실패: {e}")
                 if attempt < self.max_retries - 1:
