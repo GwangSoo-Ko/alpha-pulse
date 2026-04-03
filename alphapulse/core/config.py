@@ -45,16 +45,17 @@ class Config:
 
         # ── KMP: Market Pulse Score 가중치 (합계 1.0) ──────────────
         self.WEIGHTS = {
-            "investor_flow": 0.20,
+            "investor_flow": 0.18,
             "spot_futures_align": 0.05,
-            "program_trade": 0.10,
+            "futures_flow": 0.07,
+            "program_trade": 0.08,
             "sector_momentum": 0.10,
             "exchange_rate": 0.10,
             "vkospi": 0.10,
             "interest_rate_diff": 0.05,
-            "global_market": 0.15,
+            "global_market": 0.13,
             "fund_flow": 0.05,
-            "adr_volume": 0.10,
+            "adr_volume": 0.09,
         }
 
         # ── KMP: 시황 판단 기준 ────────────────────────────────────

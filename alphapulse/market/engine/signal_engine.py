@@ -145,7 +145,68 @@ class SignalEngine:
             indicator_scores["spot_futures_align"] = None
             details["spot_futures_align"] = {"score": None, "details": f"분석 실패: {e}"}
 
-        # 3. 프로그램 매매 (10%)
+        # 2.5. 선물 투자자 수급 (7%) — 외국인/기관 선물 포지셔닝 + 현선물 교차검증
+        try:
+            import numpy as np
+            futures_trend = self.krx.get_futures_investor_trend(days=10)
+            if futures_trend is not None and not futures_trend.empty and "외국인" in futures_trend.columns:
+                latest = futures_trend.head(1)
+                foreign_futures = latest["외국인"].iloc[0]  # 억원
+                inst_futures = latest["기관합계"].iloc[0]    # 억원
+
+                # 기본 점수: 외국인 70% + 기관 30%
+                f_score = float(np.clip(foreign_futures / 2000 * 100, -100, 100))
+                i_score = float(np.clip(inst_futures / 1500 * 100, -100, 100))
+                base = f_score * 0.7 + i_score * 0.3
+
+                # 5일 추세 블렌딩 (당일 60% + 5일 평균 40%)
+                if len(futures_trend) >= 5:
+                    avg_5d = futures_trend.head(5)["외국인"].mean()
+                    trend_s = float(np.clip(avg_5d / 2000 * 100, -100, 100))
+                    base = base * 0.6 + trend_s * 0.4
+
+                # 현선물 교차 검증
+                cross_label = ""
+                spot_flow = details.get("investor_flow", {})
+                if isinstance(spot_flow, dict) and "foreign_net" in spot_flow:
+                    spot_foreign = spot_flow["foreign_net"]
+                    spot_dir = 1 if spot_foreign > 0 else -1
+                    fut_dir = 1 if foreign_futures > 0 else -1
+                    if spot_dir == fut_dir:
+                        base = min(base * 1.2, 100) if base > 0 else max(base * 1.2, -100)
+                        cross_label = "현선물 동조"
+                    else:
+                        base = base * 0.7
+                        cross_label = "현선물 괴리"
+
+                score = int(round(float(np.clip(base, -100, 100))))
+
+                # 5일 외국인 추세
+                foreign_5d = futures_trend.head(5)["외국인"].sum() if len(futures_trend) >= 5 else foreign_futures
+
+                futures_flow_result = {
+                    "score": score,
+                    "foreign_net": foreign_futures,
+                    "inst_net": inst_futures,
+                    "foreign_5d": foreign_5d,
+                    "cross_check": cross_label,
+                    "details": (
+                        f"선물 외국인 {foreign_futures:+,.0f}억 | 기관 {inst_futures:+,.0f}억"
+                        f" | 5일 외국인 {foreign_5d:+,.0f}억"
+                        + (f" | {cross_label}" if cross_label else "")
+                    ),
+                }
+            else:
+                futures_flow_result = {"score": 0, "details": "선물 수급 데이터 없음"}
+
+            indicator_scores["futures_flow"] = futures_flow_result["score"]
+            details["futures_flow"] = futures_flow_result
+        except Exception as e:
+            logger.warning(f"선물 투자자 수급 분석 실패: {e}")
+            indicator_scores["futures_flow"] = None
+            details["futures_flow"] = {"score": None, "details": f"분석 실패: {e}"}
+
+        # 3. 프로그램 매매 (8%)
         try:
             program_df = self.krx.get_program_trading(target_date)
             program_result = self.program_analyzer.analyze(program_df)

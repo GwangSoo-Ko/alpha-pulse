@@ -378,6 +378,62 @@ class KrxScraper(BaseCollector):
             return pd.DataFrame()
         return deposit_df[["날짜", "신용잔고"]]
 
+    @retry()
+    def get_futures_investor_trend(self, days: int = 10) -> pd.DataFrame:
+        """선물 투자자별 일별 매매동향 (네이버 금융 sosok=03)
+
+        Returns:
+            DataFrame with columns: 날짜, 개인, 외국인, 기관합계, 기타법인 (억원 단위).
+        """
+        cache_key = "naver:futures_investor_trend"
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
+
+        try:
+            bizdate = datetime.now().strftime("%Y%m%d")
+            url = (
+                f"https://finance.naver.com/sise/investorDealTrendDay.naver"
+                f"?bizdate={bizdate}&sosok=03"
+            )
+            resp = self.session.get(url, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            table = soup.find("table", {"class": "type_1"})
+            if not table:
+                return pd.DataFrame()
+
+            data_rows = []
+            for row in table.find_all("tr"):
+                cols = row.find_all("td")
+                if len(cols) < 6:
+                    continue
+                date_text = cols[0].get_text(strip=True)
+                if not date_text or "." not in date_text:
+                    continue
+
+                data_rows.append({
+                    "날짜": date_text,
+                    "개인": _parse_number(cols[1].get_text(strip=True)),
+                    "외국인": _parse_number(cols[2].get_text(strip=True)),
+                    "기관합계": _parse_number(cols[3].get_text(strip=True)),
+                    "기타법인": _parse_number(cols[-1].get_text(strip=True)),
+                })
+                if len(data_rows) >= days:
+                    break
+
+            if not data_rows:
+                return pd.DataFrame()
+
+            df = pd.DataFrame(data_rows)
+            self._set_cached(cache_key, df)
+            return df
+
+        except Exception as e:
+            self.logger.warning(f"선물 투자자별 매매동향 수집 실패: {e}")
+            return pd.DataFrame()
+
     def get_spot_futures_trend(self) -> dict:
         """KOSPI vs KPI200 투자자 동향으로 현선물 방향 비교 -- 네이버 모바일 API"""
         try:

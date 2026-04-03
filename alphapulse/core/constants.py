@@ -3,6 +3,7 @@
 INDICATOR_NAMES = {
     "investor_flow": "외국인+기관 수급",
     "spot_futures_align": "선물 베이시스",
+    "futures_flow": "선물 수급",
     "program_trade": "프로그램 비차익",
     "sector_momentum": "업종 모멘텀",
     "exchange_rate": "환율 (USD/KRW)",
