@@ -70,24 +70,50 @@ class SignalEngine:
         indicator_scores = {}
         details = {}
 
-        # 1. 투자자 수급 (20%) — 직전 거래일 기준 + 5일 추세
+        # 1. 투자자 수급 (20%) — KOSPI/KOSDAQ 각각 + 합산 점수
         try:
-            # 일별 추세 데이터(웹 크롤링)를 메인 소스로 사용
-            # — 네이버 모바일 API trend는 당일(장중) 데이터를 반환하므로
-            #   장전 분석 시 불완전할 수 있음
-            trend_df = self.krx.get_investor_trend_daily(days=10)
-            if trend_df is not None and not trend_df.empty and "외국인" in trend_df.columns:
-                # 일별 추세 데이터를 수급 분석 형식으로 변환 (최근 1일 = 직전 거래일)
-                latest = trend_df.head(1)
+            # KOSPI, KOSDAQ 각각 수집
+            kospi_trend = self.krx.get_investor_trend_daily(days=10, market="KOSPI")
+            kosdaq_trend = self.krx.get_investor_trend_daily(days=10, market="KOSDAQ")
+
+            # 합산 데이터로 점수 산출
+            all_trend = self.krx.get_investor_trend_daily(days=10, market="ALL")
+
+            if all_trend is not None and not all_trend.empty and "외국인" in all_trend.columns:
+                latest = all_trend.head(1)
                 trading_df = pd.DataFrame([{
                     "외국인합계": latest["외국인"].iloc[0] * 100_000_000,
                     "기관합계": latest["기관합계"].iloc[0] * 100_000_000,
                 }])
+                trend_df = all_trend
             else:
-                # 웹 크롤링 실패 시 네이버 모바일 API 폴백
                 trading_df = self.pykrx.get_investor_trading(start_date, target_date)
                 trend_df = None
+
             flow_result = self.investor_analyzer.analyze_flow(trading_df, trend_df=trend_df)
+
+            # KOSPI/KOSDAQ 상세 정보 추가
+            kospi_detail = ""
+            kosdaq_detail = ""
+            if kospi_trend is not None and not kospi_trend.empty:
+                kl = kospi_trend.head(1)
+                kospi_foreign = kl["외국인"].iloc[0]
+                kospi_inst = kl["기관합계"].iloc[0]
+                kospi_5d = kospi_trend.head(5)["외국인"].sum()
+                kospi_detail = f"KOSPI 외국인 {kospi_foreign:+,.0f}억 | 기관 {kospi_inst:+,.0f}억 | 5일 외국인 {kospi_5d:+,.0f}억"
+            if kosdaq_trend is not None and not kosdaq_trend.empty:
+                kl = kosdaq_trend.head(1)
+                kosdaq_foreign = kl["외국인"].iloc[0]
+                kosdaq_inst = kl["기관합계"].iloc[0]
+                kosdaq_5d = kosdaq_trend.head(5)["외국인"].sum()
+                kosdaq_detail = f"KOSDAQ 외국인 {kosdaq_foreign:+,.0f}억 | 기관 {kosdaq_inst:+,.0f}억 | 5일 외국인 {kosdaq_5d:+,.0f}억"
+
+            # 기존 details 문자열에 KOSPI/KOSDAQ 분리 정보 추가
+            if "details" in flow_result:
+                flow_result["details"] = flow_result["details"] + f"\n    {kospi_detail}\n    {kosdaq_detail}"
+            flow_result["kospi_trend"] = kospi_trend
+            flow_result["kosdaq_trend"] = kosdaq_trend
+
             indicator_scores["investor_flow"] = flow_result["score"]
             details["investor_flow"] = flow_result
         except Exception as e:

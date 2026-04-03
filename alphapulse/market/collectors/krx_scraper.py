@@ -42,29 +42,32 @@ class KrxScraper(BaseCollector):
         self.session.headers.update(NAVER_HEADERS)
 
     @retry()
-    def get_investor_trend_daily(self, days: int = 10) -> pd.DataFrame:
+    def get_investor_trend_daily(self, days: int = 10, market: str = "KOSPI") -> pd.DataFrame:
         """투자자별 일별 매매동향 (네이버 금융 크롤링, 최근 N거래일)
 
         네이버 금융 investorDealTrendDay 페이지에서 일별 투자자 순매수를 수집한다.
-        수급 추세 분석(5일 누적)에 사용된다.
 
         Args:
             days: 수집할 거래일 수 (기본 10일).
+            market: "KOSPI" (sosok=01), "KOSDAQ" (sosok=02), "ALL" (합산).
 
         Returns:
             DataFrame with columns: 날짜, 개인, 외국인, 기관합계, 기타법인 (억원 단위).
         """
-        cache_key = "naver:investor_trend_daily"
+        cache_key = f"naver:investor_trend_daily:{market}"
         cached = self._get_cached(cache_key)
         if cached is not None:
             return cached
 
+        # sosok 매핑: KOSPI=01, KOSDAQ=02 (네이버 금융 investorDealTrendDay 기준)
+        market_sosok = {"KOSPI": ["01"], "KOSDAQ": ["02"], "ALL": ["01", "02"]}
+        sosok_list = market_sosok.get(market, ["01"])
+
         try:
             bizdate = datetime.now().strftime("%Y%m%d")
-
-            # KOSPI(sosok=00) + KOSDAQ(sosok=01) 합산
             combined_rows = {}
-            for sosok in ["00", "01"]:
+
+            for sosok in sosok_list:
                 url = (
                     f"https://finance.naver.com/sise/investorDealTrendDay.naver"
                     f"?bizdate={bizdate}&sosok={sosok}"
@@ -110,10 +113,9 @@ class KrxScraper(BaseCollector):
                         break
 
             if not combined_rows:
-                self.logger.warning("투자자 일별 매매동향 데이터 행 없음")
+                self.logger.warning(f"투자자 일별 매매동향 데이터 행 없음 ({market})")
                 return pd.DataFrame()
 
-            # 날짜 내림차순 정렬
             data_rows = sorted(combined_rows.values(),
                                key=lambda x: x["날짜"], reverse=True)[:days]
 
