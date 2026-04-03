@@ -60,51 +60,62 @@ class KrxScraper(BaseCollector):
             return cached
 
         try:
-            # 오늘 날짜 기준으로 bizdate 설정 (최근 거래일 데이터 제공)
             bizdate = datetime.now().strftime("%Y%m%d")
-            url = (
-                f"https://finance.naver.com/sise/investorDealTrendDay.naver"
-                f"?bizdate={bizdate}&sosok=01"
-            )
-            resp = self.session.get(url, timeout=REQUEST_TIMEOUT)
-            resp.raise_for_status()
 
-            soup = BeautifulSoup(resp.text, "html.parser")
-            table = soup.find("table", {"class": "type_1"})
-            if not table:
-                self.logger.warning("투자자 일별 매매동향 테이블 없음")
-                return pd.DataFrame()
+            # KOSPI(sosok=00) + KOSDAQ(sosok=01) 합산
+            combined_rows = {}
+            for sosok in ["00", "01"]:
+                url = (
+                    f"https://finance.naver.com/sise/investorDealTrendDay.naver"
+                    f"?bizdate={bizdate}&sosok={sosok}"
+                )
+                resp = self.session.get(url, timeout=REQUEST_TIMEOUT)
+                resp.raise_for_status()
 
-            data_rows = []
-            for row in table.find_all("tr"):
-                cols = row.find_all("td")
-                if len(cols) < 6:
-                    continue
-                date_text = cols[0].get_text(strip=True)
-                if not date_text or "." not in date_text:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                table = soup.find("table", {"class": "type_1"})
+                if not table:
                     continue
 
-                # 컬럼: 날짜, 개인, 외국인, 기관계, (기관세부...), 기타법인
-                personal = _parse_number(cols[1].get_text(strip=True))
-                foreign = _parse_number(cols[2].get_text(strip=True))
-                institutional = _parse_number(cols[3].get_text(strip=True))
-                # 기타법인은 마지막 컬럼
-                others = _parse_number(cols[-1].get_text(strip=True))
+                count = 0
+                for row in table.find_all("tr"):
+                    cols = row.find_all("td")
+                    if len(cols) < 6:
+                        continue
+                    date_text = cols[0].get_text(strip=True)
+                    if not date_text or "." not in date_text:
+                        continue
 
-                data_rows.append({
-                    "날짜": date_text,
-                    "개인": personal,
-                    "외국인": foreign,
-                    "기관합계": institutional,
-                    "기타법인": others,
-                })
+                    personal = _parse_number(cols[1].get_text(strip=True))
+                    foreign = _parse_number(cols[2].get_text(strip=True))
+                    institutional = _parse_number(cols[3].get_text(strip=True))
+                    others = _parse_number(cols[-1].get_text(strip=True))
 
-                if len(data_rows) >= days:
-                    break
+                    if date_text in combined_rows:
+                        combined_rows[date_text]["개인"] += personal
+                        combined_rows[date_text]["외국인"] += foreign
+                        combined_rows[date_text]["기관합계"] += institutional
+                        combined_rows[date_text]["기타법인"] += others
+                    else:
+                        combined_rows[date_text] = {
+                            "날짜": date_text,
+                            "개인": personal,
+                            "외국인": foreign,
+                            "기관합계": institutional,
+                            "기타법인": others,
+                        }
 
-            if not data_rows:
+                    count += 1
+                    if count >= days:
+                        break
+
+            if not combined_rows:
                 self.logger.warning("투자자 일별 매매동향 데이터 행 없음")
                 return pd.DataFrame()
+
+            # 날짜 내림차순 정렬
+            data_rows = sorted(combined_rows.values(),
+                               key=lambda x: x["날짜"], reverse=True)[:days]
 
             df = pd.DataFrame(data_rows)
             self._set_cached(cache_key, df)
