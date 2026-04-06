@@ -66,6 +66,27 @@ class BriefingOrchestrator:
 
     async def run_async(self, date: str | None = None, send_telegram: bool = True) -> dict:
         """전체 브리핑 파이프라인 실행 (async entry point)."""
+        # [0-1] 피드백: 전일 시장 결과 수집 + 미확정 시그널 평가
+        feedback_context = None
+        daily_result_msg = ""
+        if self.config.FEEDBACK_ENABLED:
+            try:
+                from alphapulse.feedback.collector import FeedbackCollector
+                from alphapulse.feedback.summarizer import FeedbackSummarizer
+                from alphapulse.core.storage.feedback import FeedbackStore
+
+                feedback_store = FeedbackStore(self.config.DATA_DIR / "feedback.db")
+                collector = FeedbackCollector(db_path=self.config.DATA_DIR / "feedback.db")
+                await asyncio.to_thread(collector.collect_and_evaluate)
+
+                summarizer = FeedbackSummarizer(store=feedback_store)
+                feedback_context = summarizer.generate_ai_context(self.config.FEEDBACK_LOOKBACK_DAYS)
+                yesterday = feedback_store.get_yesterday()
+                daily_result_msg = summarizer.format_daily_result(yesterday)
+                logger.info("피드백 수집/평가 완료")
+            except Exception as e:
+                logger.warning(f"피드백 수집 실패, 스킵: {e}")
+
         # [1] 정량 분석 (sync — thread에서 실행)
         logger.info("정량 분석 실행 중...")
         pulse_result = await asyncio.to_thread(self.run_quantitative, date)
@@ -112,6 +133,21 @@ class BriefingOrchestrator:
             pulse_result["signal"], pulse_result.get("details", {})
         )
 
+        # [7] 오늘 시그널을 feedback DB에 기록
+        if self.config.FEEDBACK_ENABLED:
+            try:
+                from alphapulse.core.storage.feedback import FeedbackStore
+                feedback_store = FeedbackStore(self.config.DATA_DIR / "feedback.db")
+                feedback_store.save_signal(
+                    date=pulse_result["date"],
+                    score=pulse_result["score"],
+                    signal=pulse_result["signal"],
+                    indicator_scores=pulse_result.get("indicator_scores", {}),
+                )
+                logger.info(f"오늘 시그널 피드백 DB 기록: {pulse_result['date']}")
+            except Exception as e:
+                logger.warning(f"시그널 피드백 기록 실패: {e}")
+
         return {
             "pulse_result": pulse_result,
             "content_summaries": content_summaries,
@@ -119,6 +155,8 @@ class BriefingOrchestrator:
             "synthesis": synthesis,
             "quant_msg": quant_msg,
             "synth_msg": synth_msg,
+            "feedback_context": feedback_context,
+            "daily_result_msg": daily_result_msg,
             "generated_at": datetime.now().isoformat(),
         }
 
