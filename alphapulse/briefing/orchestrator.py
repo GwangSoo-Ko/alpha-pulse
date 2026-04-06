@@ -69,6 +69,8 @@ class BriefingOrchestrator:
         # [0-1] 피드백: 전일 시장 결과 수집 + 미확정 시그널 평가
         feedback_context = None
         daily_result_msg = ""
+        feedback_store = None
+        yesterday = None
         if self.config.FEEDBACK_ENABLED:
             try:
                 from alphapulse.feedback.collector import FeedbackCollector
@@ -86,6 +88,42 @@ class BriefingOrchestrator:
                 logger.info("피드백 수집/평가 완료")
             except Exception as e:
                 logger.warning(f"피드백 수집 실패, 스킵: {e}")
+
+        # [0-2] 뉴스 수집
+        news = {"articles": []}
+        if self.config.FEEDBACK_ENABLED and self.config.FEEDBACK_NEWS_ENABLED:
+            try:
+                from alphapulse.feedback.news_collector import NewsCollector
+                news_collector = NewsCollector()
+                news = await news_collector.collect_market_news()
+                logger.info(f"장 후 뉴스 {len(news.get('articles', []))}건 수집")
+            except Exception as e:
+                logger.warning(f"뉴스 수집 실패, 스킵: {e}")
+
+        # [0-3] 사후 분석 (전일 시그널 + 결과가 있을 때만)
+        post_analysis = None
+        if self.config.FEEDBACK_ENABLED and yesterday is not None and yesterday.get("return_1d") is not None:
+            try:
+                from alphapulse.feedback.agents.orchestrator import PostMarketOrchestrator
+                post_orch = PostMarketOrchestrator()
+                post_analysis = await post_orch.analyze(
+                    signal=yesterday,
+                    news=news,
+                    content_summaries=self.collect_recent_content(hours=48),
+                )
+                # 분석 결과를 DB에 저장
+                import json
+                feedback_store.update_analysis(
+                    date=yesterday["date"],
+                    post_analysis=post_analysis.get("senior_synthesis", ""),
+                    news_summary="\n".join(
+                        a.get("title", "") for a in news.get("articles", [])[:5]
+                    ),
+                    blind_spots=post_analysis.get("blind_spots", ""),
+                )
+                logger.info("사후 분석 완료 및 저장")
+            except Exception as e:
+                logger.warning(f"사후 분석 실패, 스킵: {e}")
 
         # [1] 정량 분석 (sync — thread에서 실행)
         logger.info("정량 분석 실행 중...")
@@ -157,6 +195,8 @@ class BriefingOrchestrator:
             "synth_msg": synth_msg,
             "feedback_context": feedback_context,
             "daily_result_msg": daily_result_msg,
+            "news": news,
+            "post_analysis": post_analysis,
             "generated_at": datetime.now().isoformat(),
         }
 
