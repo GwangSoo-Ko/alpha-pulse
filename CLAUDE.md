@@ -56,7 +56,36 @@ ap cache clear                               # 캐시 초기화
 
 ## File Conventions
 
-- 마이그레이션 모듈: import 경로만 변경, 로직 유지
 - 새 모듈: TDD (test first → red → implement → green → commit)
 - Config 접근: `Config()` 인스턴스 사용, 모듈 레벨 상수 대신
 - Commit: 기능 단위 incremental commit
+- 한 파일에 한 클래스/한 책임. 파일이 200줄 넘으면 분리 검토.
+
+## Async/Sync Rules
+
+- `alphapulse/market/` — SYNC only (requests, pykrx). 절대 async 사용 안 함.
+- `alphapulse/content/`, `alphapulse/feedback/agents/` — ASYNC (httpx, google-adk).
+- `asyncio.run()`은 CLI entry point에서만 호출. 내부에서는 `await` 사용.
+- sync API를 async에서 호출할 때: `await asyncio.to_thread(sync_func, args)`.
+- LLM 호출 패턴: `async def _call_llm()` → `asyncio.to_thread(client.generate_content)`.
+
+## AI Agent Conventions
+
+- 모든 에이전트: `__init__(self)` → `Config()` 인스턴스 생성.
+- LLM 호출: `google.genai.Client` 사용, `asyncio.to_thread()`로 래핑.
+- 프롬프트: 모듈 상단에 `PROMPT_TEMPLATE` 상수로 정의.
+- 실패 시: `_fallback()` 메서드로 graceful degradation. 예외 전파하지 않음.
+- 테스트: `@patch("module.Class._call_llm")` 으로 LLM mock.
+
+## Storage Conventions
+
+- SQLite 기반. `__init__(self, db_path)` 패턴.
+- 테이블 생성: `__init__`에서 `CREATE TABLE IF NOT EXISTS`.
+- 테스트: `tmp_path` fixture 사용, 실제 DB 파일 생성하지 않음.
+
+## Custom Commands
+
+- `/test [module]` — 테스트 실행 (전체 또는 특정 모듈)
+- `/coverage` — 커버리지 리포트
+- `/push [message]` — 커밋 + 푸시
+- `/status` — 프로젝트 현황 (git + 테스트)
