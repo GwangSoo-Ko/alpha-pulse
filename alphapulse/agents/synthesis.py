@@ -19,6 +19,7 @@ SYNTHESIS_PROMPT = """당신은 20년 경력의 수석 투자 전략가(Senior S
 5. 투자 방향 제안 포함
 6. 한국어로 작성
 
+{feedback_context}
 === 정량 분석 (Market Pulse) ===
 날짜: {date}
 종합 점수: {score} ({signal})
@@ -41,7 +42,8 @@ class SeniorSynthesisAgent:
         self.config = Config()
 
     def _build_prompt(self, pulse_result: dict, content_summaries: list[str],
-                      commentary: str | None) -> str:
+                      commentary: str | None,
+                      feedback_context: str | None = None) -> str:
         indicators = "\n".join(
             f"  {INDICATOR_NAMES.get(k, k)}: {v:+.0f}"
             for k, v in pulse_result.get("indicator_scores", {}).items()
@@ -58,6 +60,10 @@ class SeniorSynthesisAgent:
         else:
             content_section = "=== 정성 분석 없음 — 정량 데이터만으로 판단 ==="
 
+        feedback_block = ""
+        if feedback_context:
+            feedback_block = f"\n{feedback_context}\n"
+
         return SYNTHESIS_PROMPT.format(
             date=pulse_result.get("date", ""),
             score=pulse_result.get("score", 0),
@@ -65,6 +71,7 @@ class SeniorSynthesisAgent:
             indicators=indicators,
             commentary_section=commentary_section,
             content_section=content_section,
+            feedback_context=feedback_block,
         )
 
     async def _call_llm(self, prompt: str) -> str:
@@ -85,9 +92,11 @@ class SeniorSynthesisAgent:
         return await asyncio.to_thread(_sync_call)
 
     async def synthesize(self, pulse_result: dict, content_summaries: list[str],
-                         commentary: str | None) -> str:
+                         commentary: str | None,
+                         feedback_context: str | None = None) -> str:
         """종합 판단 생성."""
-        prompt = self._build_prompt(pulse_result, content_summaries, commentary)
+        prompt = self._build_prompt(pulse_result, content_summaries, commentary,
+                                    feedback_context=feedback_context)
         try:
             return await self._call_llm(prompt)
         except Exception as e:

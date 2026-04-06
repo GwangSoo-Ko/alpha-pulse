@@ -52,6 +52,13 @@ def test_build_prompt(sample_pulse):
     assert "관세 분석" in prompt
 
 
+def test_build_prompt_with_feedback(sample_pulse):
+    agent = SeniorSynthesisAgent()
+    feedback = "=== 피드백 === V-KOSPI 신뢰도 낮음"
+    prompt = agent._build_prompt(sample_pulse, [], None, feedback_context=feedback)
+    assert "V-KOSPI 신뢰도" in prompt
+
+
 def test_build_prompt_no_content(sample_pulse):
     agent = SeniorSynthesisAgent()
     prompt = agent._build_prompt(sample_pulse, [], None)

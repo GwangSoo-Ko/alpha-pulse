@@ -138,7 +138,8 @@ class BriefingOrchestrator:
         try:
             from alphapulse.agents.commentary import MarketCommentaryAgent
             agent = MarketCommentaryAgent()
-            commentary = await agent.generate(pulse_result, content_summaries)
+            commentary = await agent.generate(pulse_result, content_summaries,
+                                               feedback_context=feedback_context)
             logger.info("AI Commentary 생성 완료")
         except Exception as e:
             logger.warning(f"AI Commentary 생성 실패, 스킵: {e}")
@@ -147,7 +148,8 @@ class BriefingOrchestrator:
         try:
             from alphapulse.agents.synthesis import SeniorSynthesisAgent
             synth_agent = SeniorSynthesisAgent()
-            synthesis = await synth_agent.synthesize(pulse_result, content_summaries, commentary)
+            synthesis = await synth_agent.synthesize(pulse_result, content_summaries, commentary,
+                                                     feedback_context=feedback_context)
             logger.info("종합 판단 생성 완료")
         except Exception as e:
             logger.warning(f"종합 판단 생성 실패, 스킵: {e}")
@@ -155,8 +157,20 @@ class BriefingOrchestrator:
         # [4] Format
         from alphapulse.briefing.formatter import BriefingFormatter
         formatter = BriefingFormatter()
-        quant_msg = formatter.format_quantitative(pulse_result)
-        synth_msg = formatter.format_synthesis(pulse_result, content_summaries, commentary)
+        quant_msg = formatter.format_quantitative(pulse_result, daily_result_msg=daily_result_msg)
+
+        # Check if Monday for weekly summary
+        is_monday = datetime.now().weekday() == 0
+        weekly_msg = ""
+        if is_monday and self.config.FEEDBACK_ENABLED:
+            try:
+                from alphapulse.feedback.summarizer import FeedbackSummarizer as _FS
+                _summarizer = _FS(store=feedback_store) if feedback_store else None
+                weekly_msg = _summarizer.format_weekly_summary() if _summarizer else ""
+            except Exception:
+                weekly_msg = ""
+
+        synth_msg = formatter.format_synthesis(pulse_result, content_summaries, commentary, weekly_summary=weekly_msg)
 
         # [5] Send via Telegram (async, 단일 이벤트 루프 내)
         if send_telegram:

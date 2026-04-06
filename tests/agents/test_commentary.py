@@ -46,6 +46,13 @@ async def test_generate(mock_llm, sample_pulse_result):
     assert len(result) > 50
 
 
+def test_build_prompt_with_feedback(sample_pulse_result):
+    agent = MarketCommentaryAgent()
+    feedback = "=== 피드백 === 적중률 72%"
+    prompt = agent._build_prompt(sample_pulse_result, [], feedback_context=feedback)
+    assert "적중률 72%" in prompt
+
+
 @pytest.mark.asyncio
 @patch("alphapulse.agents.commentary.MarketCommentaryAgent._call_llm")
 async def test_generate_fallback_on_failure(mock_llm, sample_pulse_result):
