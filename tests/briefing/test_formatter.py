@@ -54,3 +54,31 @@ def test_telegram_message_length():
     }
     html = formatter.format_quantitative(pulse_result)
     assert len(html) < 8192
+
+
+def test_format_quantitative_with_daily_result():
+    formatter = BriefingFormatter()
+    pulse = {"date": "20260403", "score": 35, "signal": "매수 우위",
+             "indicator_scores": {}, "details": {}}
+    html = formatter.format_quantitative(pulse, daily_result_msg="📊 어제: 매수(+36) → +1.2% ✅")
+    assert "어제" in html
+    assert "✅" in html
+
+
+def test_format_synthesis_with_weekly():
+    formatter = BriefingFormatter()
+    pulse = {"date": "20260407", "score": 20, "signal": "매수 우위",
+             "indicator_scores": {}, "details": {}}
+    weekly = "<b>📈 주간 피드백</b>\n적중률: 1일 72%"
+    html = formatter.format_synthesis(pulse, [], "commentary", weekly_summary=weekly)
+    assert "주간 피드백" in html
+
+
+def test_format_quantitative_without_feedback():
+    """피드백 없이 기존대로 동작하는지 확인."""
+    formatter = BriefingFormatter()
+    pulse = {"date": "20260403", "score": 35, "signal": "매수 우위",
+             "indicator_scores": {"investor_flow": 68}, "details": {}}
+    html = formatter.format_quantitative(pulse)
+    assert "정량 리포트" in html
+    assert "어제" not in html  # no daily result

@@ -27,7 +27,7 @@ class BriefingFormatter:
         except (ValueError, TypeError):
             return date_str
 
-    def format_quantitative(self, pulse_result: dict) -> str:
+    def format_quantitative(self, pulse_result: dict, daily_result_msg: str = "") -> str:
         """정량 리포트 HTML 포맷팅."""
         score = pulse_result["score"]
         signal = pulse_result["signal"]
@@ -45,6 +45,12 @@ class BriefingFormatter:
             if s is not None:
                 emoji = self._score_emoji(s)
                 lines.append(f"{emoji} {name}: <b>{s:+.0f}</b>")
+
+        # Append yesterday's result if available
+        if daily_result_msg:
+            lines.append("")
+            lines.append(daily_result_msg)
+
         return "\n".join(lines)
 
     def format_synthesis(
@@ -52,6 +58,7 @@ class BriefingFormatter:
         pulse_result: dict,
         content_summaries: list[str],
         commentary: str | None,
+        weekly_summary: str = "",
     ) -> str:
         """종합 리포트 HTML 포맷팅."""
         score = pulse_result.get("score", 0)
@@ -72,4 +79,10 @@ class BriefingFormatter:
                 lines.append(f"• {s}")
         else:
             lines.append("<i>최근 콘텐츠 분석 없음 — 정량 데이터 기반 판단</i>")
+
+        # Append weekly summary if available (Monday only — caller decides)
+        if weekly_summary:
+            lines.append("")
+            lines.append(weekly_summary)
+
         return "\n".join(lines)

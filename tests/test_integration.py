@@ -92,3 +92,32 @@ def test_formatter_synthesis_e2e():
     )
     assert "📋" in html
     assert "종합 리포트" in html
+
+
+def test_feedback_cli_help():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["feedback", "--help"])
+    assert result.exit_code == 0
+    assert "evaluate" in result.output
+    assert "report" in result.output
+    assert "indicators" in result.output
+    assert "history" in result.output
+
+
+def test_feedback_store_integration(tmp_path):
+    from alphapulse.core.storage.feedback import FeedbackStore
+    store = FeedbackStore(tmp_path / "fb.db")
+    store.save_signal("20260403", 35.0, "매수 우위", {"investor_flow": 68})
+    store.update_result("20260403", 2650, 1.2, 870, 0.8, 1.2, 1)
+    row = store.get("20260403")
+    assert row["hit_1d"] == 1
+
+    from alphapulse.feedback.evaluator import FeedbackEvaluator
+    evaluator = FeedbackEvaluator(store=store)
+    rates = evaluator.get_hit_rates(30)
+    assert rates["hit_rate_1d"] == 1.0
+
+    from alphapulse.feedback.summarizer import FeedbackSummarizer
+    summarizer = FeedbackSummarizer(store=store, evaluator=evaluator)
+    msg = summarizer.format_daily_result(row)
+    assert "✅" in msg
