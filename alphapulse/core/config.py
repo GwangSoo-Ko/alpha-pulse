@@ -117,6 +117,12 @@ class Config:
             os.environ.get("BRIEFING_ENABLED", "true").lower() == "true"
         )
 
+        # ── Feedback 설정 ────────────────────────────────────────
+        self.FEEDBACK_ENABLED = os.environ.get("FEEDBACK_ENABLED", "true").lower() == "true"
+        self.FEEDBACK_LOOKBACK_DAYS = int(os.environ.get("FEEDBACK_LOOKBACK_DAYS", "30"))
+        self.FEEDBACK_NEWS_ENABLED = os.environ.get("FEEDBACK_NEWS_ENABLED", "true").lower() == "true"
+        self.FEEDBACK_NEWS_COUNT = int(os.environ.get("FEEDBACK_NEWS_COUNT", "10"))
+
     # ── 유틸리티 메서드 (KMP 유래) ──────────────────────────────────
 
     def get_signal_label(self, score: float) -> str:

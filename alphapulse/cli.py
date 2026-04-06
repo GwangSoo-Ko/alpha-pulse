@@ -261,3 +261,94 @@ def cache_clear():
     cache_db = DataCache(cfg.CACHE_DB)
     cache_db.clear()
     click.echo("캐시가 초기화되었습니다.")
+
+
+# ── Feedback 서브커맨드 ────────────────────────────────────────────
+
+
+@cli.group()
+def feedback():
+    """피드백 시스템 — 시그널 검증 + 적중률."""
+    pass
+
+
+@feedback.command("evaluate")
+def feedback_evaluate():
+    """미확정 시그널에 대해 시장 결과 수집 + 평가."""
+    from alphapulse.feedback.collector import FeedbackCollector
+    collector = FeedbackCollector()
+    collector.collect_and_evaluate()
+    click.echo("피드백 평가 완료")
+
+
+@feedback.command("report")
+@click.option("--days", default=30, help="분석 기간 (일)")
+def feedback_report(days):
+    """적중률 리포트."""
+    from alphapulse.feedback.evaluator import FeedbackEvaluator
+    evaluator = FeedbackEvaluator()
+    rates = evaluator.get_hit_rates(days)
+    corr = evaluator.get_correlation(days)
+
+    click.echo(f"\n📊 피드백 리포트 (최근 {days}일)")
+    click.echo(f"평가 건수: {rates['total_evaluated']}")
+    click.echo(f"1일 적중률: {rates['hit_rate_1d']:.0%} ({rates['count_1d']}건)")
+    click.echo(f"3일 적중률: {rates['hit_rate_3d']:.0%} ({rates['count_3d']}건)")
+    click.echo(f"5일 적중률: {rates['hit_rate_5d']:.0%} ({rates['count_5d']}건)")
+    if corr is not None:
+        click.echo(f"상관계수: {corr:.3f}")
+    else:
+        click.echo("상관계수: 데이터 부족")
+
+
+@feedback.command("indicators")
+@click.option("--days", default=30, help="분석 기간 (일)")
+def feedback_indicators(days):
+    """지표별 적중률 순위."""
+    from alphapulse.feedback.evaluator import FeedbackEvaluator
+    evaluator = FeedbackEvaluator()
+    accuracy = evaluator.get_indicator_accuracy(days)
+
+    if not accuracy:
+        click.echo("지표별 적중률 데이터가 없습니다.")
+        return
+
+    click.echo(f"\n📊 지표별 적중률 (최근 {days}일, 극단값 기준)")
+    sorted_acc = sorted(accuracy.items(), key=lambda x: x[1]["accuracy"], reverse=True)
+    for key, val in sorted_acc:
+        bar = "█" * int(val["accuracy"] * 10)
+        click.echo(f"  {key:25s} {val['accuracy']:5.0%} {bar} ({val['total']}건)")
+
+
+@feedback.command("history")
+@click.option("--days", default=7, help="표시 기간 (일)")
+def feedback_history(days):
+    """최근 시그널 vs 실제 결과 테이블."""
+    from alphapulse.core.storage.feedback import FeedbackStore
+    from alphapulse.core.config import Config
+    cfg = Config()
+    store = FeedbackStore(cfg.DATA_DIR / "feedback.db")
+    records = store.get_recent(days=days)
+
+    if not records:
+        click.echo("피드백 데이터가 없습니다.")
+        return
+
+    click.echo(f"\n📊 시그널 이력 (최근 {days}일)")
+    click.echo(f"{'날짜':>10} {'점수':>6} {'시그널':>12} {'KOSPI':>8} {'1일':>6} {'적중':>4}")
+    click.echo("-" * 52)
+    for r in records:
+        date = r["date"]
+        score = f"{r['score']:+.0f}" if r["score"] is not None else "N/A"
+        signal = r.get("signal", "")[:8]
+        kospi = f"{r['kospi_change_pct']:+.1f}%" if r.get("kospi_change_pct") is not None else "-"
+        ret1d = f"{r['return_1d']:+.1f}%" if r.get("return_1d") is not None else "-"
+        hit = "✅" if r.get("hit_1d") == 1 else "❌" if r.get("hit_1d") == 0 else "-"
+        click.echo(f"{date:>10} {score:>6} {signal:>12} {kospi:>8} {ret1d:>6} {hit:>4}")
+
+
+@feedback.command("analyze")
+@click.option("--date", default=None, help="분석 날짜 (YYYY-MM-DD)")
+def feedback_analyze(date):
+    """특정 날짜 사후 분석 실행."""
+    click.echo("사후 분석은 Phase B에서 구현 예정")
