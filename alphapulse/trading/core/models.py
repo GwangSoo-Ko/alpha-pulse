@@ -111,7 +111,7 @@ class OrderResult:
     filled_price: float
     commission: float
     tax: float
-    filled_at: datetime
+    filled_at: Optional[datetime]
 
 
 @dataclass
