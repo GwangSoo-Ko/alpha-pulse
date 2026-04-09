@@ -268,9 +268,8 @@ class BulkCollector:
     def _collect_stock_list(self, market: str, date: str | None = None) -> list[str]:
         """종목 목록을 수집하고 코드 리스트를 반환한다.
 
-        pykrx의 get_market_ticker_list를 호출한다.
-        date가 None이거나 KRX에 데이터가 없는 날짜면,
-        날짜 없이 호출하여 pykrx가 최근 영업일을 자동 탐색하게 한다.
+        1차: pykrx get_market_ticker_list 시도.
+        2차: 네이버 금융 시가총액 페이지 스크래핑 (KRX 로그인 필요 시 폴백).
 
         Args:
             market: 시장 ("KOSPI" | "KOSDAQ").
@@ -281,77 +280,99 @@ class BulkCollector:
         """
         tickers = []
 
-        # 1차: 지정 날짜로 시도
-        if date is not None:
-            try:
+        # 1차: pykrx 시도
+        try:
+            if date is not None:
                 tickers = stock.get_market_ticker_list(date, market=market)
-            except Exception:
-                logger.debug("종목 목록 수집 실패 (date=%s): 최근 영업일로 재시도", date)
-
-        # 2차: 날짜 없이 호출 — pykrx가 최근 영업일 자동 탐색
-        if not tickers:
-            try:
+            if not tickers:
                 tickers = stock.get_market_ticker_list(market=market)
-            except Exception:
-                pass
+        except Exception:
+            pass
 
-        # 3차: 날짜를 하루씩 과거로 이동하며 최대 30일 탐색
+        # 2차: 네이버 금융 스크래핑 (pykrx 실패 시)
         if not tickers:
-            base = datetime.now()
-            for i in range(1, 31):
-                try_date = (base - timedelta(days=i)).strftime("%Y%m%d")
-                try:
-                    tickers = stock.get_market_ticker_list(try_date, market=market)
-                    if tickers:
-                        logger.info("종목 목록 조회 성공: %s %s (%d종목)", market, try_date, len(tickers))
-                        break
-                except Exception:
-                    continue
+            logger.info("%s: pykrx 실패. 네이버 금융에서 종목 목록 수집.", market)
+            tickers = self._scrape_naver_stock_list(market)
 
         if not tickers:
-            logger.warning("종목 목록 수집 실패: %s (모든 날짜 시도 실패)", market)
+            logger.warning("종목 목록 수집 실패: %s", market)
             return []
 
+        # DB에 종목 정보 저장
         for ticker in tickers:
             try:
                 name = stock.get_market_ticker_name(ticker)
                 self.store.upsert_stock(ticker, name, market)
             except Exception:
+                # pykrx 이름 조회 실패 시 네이버에서 이미 저장된 이름 유지
                 pass
 
         logger.info("%s 종목 %d개 로드", market, len(tickers))
         return tickers
 
+    def _scrape_naver_stock_list(self, market: str) -> list[str]:
+        """네이버 금융 시가총액 페이지에서 종목 목록을 스크래핑한다.
+
+        Args:
+            market: "KOSPI" 또는 "KOSDAQ".
+
+        Returns:
+            종목코드 리스트.
+        """
+        import requests
+        from bs4 import BeautifulSoup
+
+        sosok = "0" if market == "KOSPI" else "1"
+        base_url = "https://finance.naver.com/sise/sise_market_sum.naver"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        tickers = []
+
+        # 최대 40페이지 (페이지당 50종목, KOSPI ~950, KOSDAQ ~1700)
+        max_pages = 40
+        for page in range(1, max_pages + 1):
+            try:
+                resp = requests.get(
+                    base_url,
+                    params={"sosok": sosok, "page": page},
+                    headers=headers,
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+                links = soup.select("a.tltle")
+                if not links:
+                    break  # 더 이상 종목 없음
+
+                for a in links:
+                    code = a["href"].split("=")[-1]
+                    name = a.text.strip()
+                    tickers.append(code)
+                    self.store.upsert_stock(code, name, market)
+
+            except Exception as e:
+                logger.warning("네이버 금융 %s 페이지 %d 실패: %s", market, page, e)
+                break
+
+        logger.info("네이버 금융에서 %s %d종목 수집", market, len(tickers))
+        return tickers
+
     def _find_latest_trading_date(self) -> str:
-        """KRX 데이터가 존재하는 가장 최근 거래일을 찾는다.
+        """pykrx OHLCV가 존재하는 가장 최근 거래일을 찾는다.
+
+        삼성전자(005930) OHLCV 조회로 최근 거래일을 탐색한다.
 
         Returns:
             최근 거래일 (YYYYMMDD).
         """
-        # 날짜 없이 호출하면 pykrx가 최근 영업일을 자동 탐색
-        try:
-            tickers = stock.get_market_ticker_list(market="KOSPI")
-            if tickers:
-                # OHLCV를 1일 조회해서 날짜 확인
-                df = stock.get_market_ohlcv(
-                    datetime.now().strftime("%Y%m%d"),
-                    datetime.now().strftime("%Y%m%d"),
-                    tickers[0],
-                )
-                if not df.empty:
-                    return df.index[-1].strftime("%Y%m%d")
-        except Exception:
-            pass
-
-        # 폴백: 하루씩 과거로 이동
         base = datetime.now()
-        for i in range(1, 60):
+        for i in range(0, 60):
             try_date = (base - timedelta(days=i)).strftime("%Y%m%d")
             try:
                 df = stock.get_market_ohlcv(try_date, try_date, "005930")
                 if not df.empty:
-                    return try_date
+                    return df.index[-1].strftime("%Y%m%d")
             except Exception:
                 continue
 
+        # 최종 폴백
         return (base - timedelta(days=1)).strftime("%Y%m%d")
