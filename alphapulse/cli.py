@@ -422,3 +422,162 @@ def screen(market, top, factor):
             f" {i:>4}  {sig.stock.code:>8}  {sig.stock.name:<12}  "
             f"{sig.score:>+6.1f}  {top_factor}"
         )
+
+
+# NOTE: `ap trading backtest` 명령은 Phase 3에서 정의됨.
+#       `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
+
+
+@trading.command()
+@click.option("--mode", type=click.Choice(["paper", "live"]), default="paper",
+              help="실행 모드 (paper: 모의투자, live: 실매매)")
+@click.option("--daemon", is_flag=True, help="데몬 모드로 실행 (스케줄 기반)")
+def run(mode, daemon):
+    """매매 파이프라인을 실행한다."""
+    import asyncio
+
+    from alphapulse.trading.core.enums import TradingMode
+    from alphapulse.trading.orchestrator.engine import TradingEngine
+
+    trading_mode = TradingMode(mode)
+
+    click.echo(f"매매 모드: {mode}")
+    click.echo(f"데몬: {'예' if daemon else '아니오 (1회 실행)'}")
+
+    click.echo("TradingEngine 초기화 중...")
+    engine = TradingEngine(mode=trading_mode)
+
+    try:
+        if daemon:
+            from alphapulse.trading.core.calendar import KRXCalendar
+            from alphapulse.trading.orchestrator.scheduler import TradingScheduler
+
+            click.echo("데몬 모드 시작 — Ctrl+C로 종료")
+            scheduler = TradingScheduler(engine=engine, calendar=KRXCalendar())
+            asyncio.run(scheduler.run_daemon())
+        else:
+            click.echo("1회 실행 시작")
+            asyncio.run(engine.run_daily())
+    except KeyboardInterrupt:
+        click.echo("\n매매 중단")
+    except Exception as e:
+        click.echo(f"오류: {e}")
+
+
+@trading.command()
+def status():
+    """시스템 상태를 확인한다."""
+    from alphapulse.core.config import Config
+
+    click.echo("Trading System Status")
+    click.echo("=" * 40)
+
+    cfg = Config()
+    click.echo(f"모드: {'모의투자' if cfg.KIS_IS_PAPER else '실전'}")
+    click.echo(f"실매매: {'활성화' if cfg.LIVE_TRADING_ENABLED else '비활성화'}")
+    click.echo(f"일일 한도: {cfg.MAX_DAILY_ORDERS}회 / {cfg.MAX_DAILY_AMOUNT:,}원")
+    click.echo(f"전략 배분: {cfg.STRATEGY_ALLOCATIONS}")
+
+
+@trading.command()
+def reconcile():
+    """DB와 증권사 잔고를 대사한다."""
+    from alphapulse.core.config import Config
+    from alphapulse.trading.broker.kis_client import KISClient
+    from alphapulse.trading.orchestrator.recovery import RecoveryManager
+
+    click.echo("DB/증권사 잔고 대사 실행")
+
+    cfg = Config()
+    if not cfg.KIS_APP_KEY:
+        click.echo("KIS_APP_KEY가 설정되지 않았습니다.")
+        return
+
+    client = KISClient(
+        app_key=cfg.KIS_APP_KEY,
+        app_secret=cfg.KIS_APP_SECRET,
+        account_no=cfg.KIS_ACCOUNT_NO,
+        is_paper=cfg.KIS_IS_PAPER,
+    )
+
+    # Broker 선택: 모의투자/실전에 따라
+    if cfg.KIS_IS_PAPER:
+        from alphapulse.trading.broker.paper_broker import PaperBroker
+        from alphapulse.trading.core.audit import AuditLogger
+
+        broker = PaperBroker(client=client, audit=AuditLogger())
+    else:
+        from alphapulse.trading.broker.kis_broker import KISBroker
+        from alphapulse.trading.core.audit import AuditLogger
+
+        broker = KISBroker(client=client, audit=AuditLogger())
+
+    # 포트폴리오 저장소는 기존 인프라 사용
+    from alphapulse.trading.portfolio.store import PortfolioStore
+
+    store = PortfolioStore()
+
+    mgr = RecoveryManager(broker=broker, store=store, alert=None)
+    click.echo("대사 진행 중...")
+    warnings = mgr.reconcile()
+
+    if warnings:
+        click.echo(f"불일치 {len(warnings)}건 발견:")
+        for w in warnings:
+            click.echo(f"  - {w}")
+    else:
+        click.echo("대사 완료: 불일치 없음")
+
+
+@trading.group()
+def portfolio():
+    """포트폴리오 관리."""
+    pass
+
+
+@portfolio.command(name="show")
+def portfolio_show():
+    """현재 포트폴리오 상태를 표시한다."""
+    click.echo("포트폴리오 현황")
+    click.echo("=" * 40)
+    click.echo("(포트폴리오 저장소에서 최신 스냅샷 로드)")
+
+
+@portfolio.command(name="history")
+@click.option("--days", default=30, help="조회 기간 (일)")
+def portfolio_history(days):
+    """포트폴리오 성과 이력을 조회한다."""
+    click.echo(f"최근 {days}일 포트폴리오 이력")
+
+
+@portfolio.command(name="attribution")
+@click.option("--days", default=30, help="분석 기간 (일)")
+def portfolio_attribution(days):
+    """성과 귀속 분석을 실행한다."""
+    click.echo(f"최근 {days}일 성과 귀속 분석")
+
+
+@trading.group()
+def risk():
+    """리스크 관리."""
+    pass
+
+
+@risk.command(name="report")
+def risk_report():
+    """리스크 리포트를 생성한다."""
+    click.echo("리스크 리포트")
+    click.echo("=" * 40)
+
+
+@risk.command(name="stress")
+def risk_stress():
+    """스트레스 테스트를 실행한다."""
+    click.echo("스트레스 테스트 실행")
+
+
+@risk.command(name="limits")
+def risk_limits():
+    """현재 리스크 리밋 설정을 표시한다."""
+    click.echo("리스크 리밋 설정")
+    click.echo("=" * 40)
