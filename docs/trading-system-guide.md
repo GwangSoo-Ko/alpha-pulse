@@ -311,6 +311,11 @@ ap trading data update
 - `stock_investor_flow`: 종목별 외국인/기관 수급
 - `collection_metadata`: 마지막 수집일 추적
 
+**데이터 소스 폴백:**
+- 종목 목록: pykrx → 네이버 금융 스크래핑 (KRX 로그인 필요 시 자동 전환)
+- OHLCV/재무/수급: pykrx (개별 종목 조회는 KRX 로그인 불필요)
+- 최근 거래일 탐색: 삼성전자(005930) OHLCV 기반 자동 감지 (시스템 날짜 비의존)
+
 > 이후 매일 `ap trading data update` 또는 TradingEngine이 자동으로 증분 업데이트를 수행한다.
 
 ### 4.1 종목 스크리닝
