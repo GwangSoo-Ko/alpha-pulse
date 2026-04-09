@@ -5,6 +5,8 @@ dist/
 build/
 .env
 data/
+!alphapulse/trading/data/
+!tests/trading/data/
 reports/
 *.log
 *.session
