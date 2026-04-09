@@ -32,6 +32,7 @@ alphapulse/trading/strategy/
 
 alphapulse/trading/portfolio/
 ├── __init__.py
+├── models.py            # Task 9a: TargetPortfolio 데이터 클래스
 ├── position_sizer.py    # Task 9: PositionSizer
 ├── optimizer.py         # Task 10: PortfolioOptimizer (mean-variance, risk parity)
 ├── rebalancer.py        # Task 11: Rebalancer (주문 생성)
@@ -45,6 +46,7 @@ alphapulse/trading/risk/
 ├── var.py               # Task 16: VaRCalculator
 ├── drawdown.py          # Task 17: DrawdownManager
 ├── stress_test.py       # Task 18: StressTest
+├── correlation.py       # Task 18a: CorrelationAnalyzer (상관관계 분석 + 집중도)
 ├── report.py            # Task 19: RiskReport
 └── manager.py           # Task 20: RiskManager (통합)
 
@@ -74,6 +76,7 @@ tests/trading/risk/
 ├── test_var.py
 ├── test_drawdown.py
 ├── test_stress_test.py
+├── test_correlation.py
 ├── test_report.py
 └── test_manager.py
 ```
@@ -169,19 +172,19 @@ class TestBaseStrategy:
         """DAILY 전략은 항상 True."""
         strategy = DummyStrategy(config={})
         strategy.rebalance_freq = RebalanceFreq.DAILY
-        assert strategy.should_rebalance("20260406", "20260407") is True
+        assert strategy.should_rebalance("20260406", "20260407", {}) is True
 
     def test_should_rebalance_weekly_monday(self):
         """WEEKLY 전략은 월요일에 True."""
         strategy = DummyStrategy(config={})
         # 2026-04-06은 월요일
-        assert strategy.should_rebalance("20260401", "20260406") is True
+        assert strategy.should_rebalance("20260401", "20260406", {}) is True
 
     def test_should_rebalance_weekly_non_monday(self):
         """WEEKLY 전략은 월요일이 아니면 False."""
         strategy = DummyStrategy(config={})
         # 2026-04-07은 화요일
-        assert strategy.should_rebalance("20260406", "20260407") is False
+        assert strategy.should_rebalance("20260406", "20260407", {}) is False
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
@@ -246,12 +249,14 @@ class BaseStrategy(ABC):
         self,
         last_rebalance: str,
         current_date: str,
+        market_context: dict,
     ) -> bool:
         """리밸런싱 시점인지 판단���다.
 
         Args:
             last_rebalance: 마지막 리밸런싱 날짜 (YYYYMMDD).
             current_date: 현재 날짜 (YYYYMMDD).
+            market_context: Market Pulse 등 시장 상황 딕셔너리.
 
         Returns:
             리밸런싱해야 하면 True.
@@ -1583,7 +1588,9 @@ from alphapulse.trading.strategy.ai_synthesizer import StrategyAISynthesizer
 
 @pytest.fixture
 def synthesizer():
-    return StrategyAISynthesizer()
+    return StrategyAISynthesizer(
+        base_allocations={"topdown_etf": 0.30, "momentum": 0.40, "value": 0.30},
+    )
 
 
 @pytest.fixture
@@ -1624,6 +1631,10 @@ class TestStrategyAISynthesizer:
         assert isinstance(result, StrategySynthesis)
         assert result.conviction_level == 0.5
         assert "실패" in result.risk_warnings[0] or "규칙" in result.reasoning
+        # base_allocations가 allocation_adjustment로 사용됨
+        assert result.allocation_adjustment == {
+            "topdown_etf": 0.30, "momentum": 0.40, "value": 0.30,
+        }
 
     def test_build_prompt(self, synthesizer, sample_inputs):
         """프롬프트가 주요 정보를 포함한다."""
@@ -1709,12 +1720,22 @@ logger = logging.getLogger(__name__)
 class StrategyAISynthesizer:
     """LLM 기반 전략 종합 판단.
 
-    LLM 실패 시 규칙 기반 _fallback()으로 안전하게 실행��다.
+    LLM 실패 시 규칙 기반 _fallback()으로 base_allocations를 사용하여 안전하게 실행��다.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        base_allocations: dict[str, float] | None = None,
+    ) -> None:
+        """StrategyAISynthesizer를 초기화한다.
+
+        Args:
+            base_allocations: 전략별 기본 배분 비율 (합계 1.0).
+                              _fallback() 시 allocation_adjustment로 사용.
+        """
         self._client = None  # google.genai.Client — lazy init
         self._model_name = "gemini-2.0-flash"
+        self.base_allocations = base_allocations or {}
 
     async def synthesize(
         self,
@@ -1901,13 +1922,16 @@ class StrategyAISynthesizer:
     def _fallback(self) -> StrategySynthesis:
         """LLM 실패 시 규칙 기반 기본 판단을 반환한다.
 
+        base_allocations를 allocation_adjustment로 사용하여
+        기본 배분 비율을 유지한다.
+
         Returns:
             안전한 기본 StrategySynthesis.
         """
         return StrategySynthesis(
             market_view="AI 분석 불가 — 정량 시그널 기반 실행",
             conviction_level=0.5,
-            allocation_adjustment={},
+            allocation_adjustment=self.base_allocations,
             stock_opinions=[],
             risk_warnings=["AI 종합 판단 실패. 규칙 기반으로 실행됨."],
             reasoning="LLM 호출 실패로 정량 시그널만 사용",
@@ -1952,6 +1976,37 @@ Create `tests/trading/portfolio/__init__.py` (빈 파일).
 `alphapulse/trading/portfolio/__init__.py`:
 ```python
 """포트폴리오 관리."""
+```
+
+- [ ] **Step 1a: Create TargetPortfolio dataclass**
+
+`alphapulse/trading/portfolio/models.py`:
+```python
+"""포트폴리오 데이터 모델.
+
+TargetPortfolio — 목표 포트폴리오를 표현하는 데이터 클래스.
+"""
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class TargetPortfolio:
+    """목표 포트폴리오.
+
+    PortfolioManager.update_target()의 반환 타입.
+
+    Attributes:
+        date: 기준 날짜 (YYYYMMDD).
+        positions: 종목코드 → 목표 비중 매핑.
+        cash_weight: 현금 비중 (0~1).
+        strategy_allocations: 전략ID → 자금 배분 비율 매핑.
+    """
+
+    date: str
+    positions: dict[str, float] = field(default_factory=dict)  # code -> target weight
+    cash_weight: float = 0.0
+    strategy_allocations: dict[str, float] = field(default_factory=dict)  # strategy_id -> capital allocation
 ```
 
 - [ ] **Step 2: Write failing test**
@@ -3578,6 +3633,7 @@ from alphapulse.trading.core.models import (
     StrategySynthesis,
 )
 from alphapulse.trading.portfolio.manager import PortfolioManager
+from alphapulse.trading.portfolio.models import TargetPortfolio
 
 
 @pytest.fixture
@@ -3601,8 +3657,8 @@ def manager():
 
 
 class TestUpdateTarget:
-    def test_generates_target_weights(self, manager, samsung):
-        """전략 시그널로부터 목표 비중을 산출한다."""
+    def test_generates_target_portfolio(self, manager, samsung):
+        """전략 시그널로부터 TargetPortfolio를 산출한다."""
         signals = {
             "momentum": [
                 Signal(stock=samsung, score=80.0,
@@ -3625,9 +3681,11 @@ class TestUpdateTarget:
             prices={"005930": 72000},
         )
 
-        assert isinstance(target, dict)
-        assert "005930" in target
-        assert 0 < target["005930"] <= 1.0
+        assert isinstance(target, TargetPortfolio)
+        assert "005930" in target.positions
+        assert 0 < target.positions["005930"] <= 1.0
+        assert target.date == "20260409"
+        assert "momentum" in target.strategy_allocations
 
     def test_applies_allocation_ratio(self, manager, samsung):
         """전략 배분 비율을 적용한다."""
@@ -3654,13 +3712,18 @@ class TestUpdateTarget:
         )
 
         # 50% 배분 * 100% 종목 비중 = 50%
-        assert target["005930"] <= 0.50 + 0.01
+        assert target.positions["005930"] <= 0.50 + 0.01
 
 
 class TestGenerateOrders:
     def test_delegates_to_rebalancer(self, manager, samsung):
         """Rebalancer에 위임한다."""
-        target = {"005930": 0.50}
+        target = TargetPortfolio(
+            date="20260409",
+            positions={"005930": 0.50},
+            cash_weight=0.50,
+            strategy_allocations={"momentum": 1.0},
+        )
         current = PortfolioSnapshot(
             date="20260409", cash=10_000_000, positions=[],
             total_value=10_000_000, daily_return=0.0,
@@ -3675,7 +3738,7 @@ class TestGenerateOrders:
         manager.rebalancer.generate_orders.return_value = expected_orders
 
         orders = manager.generate_orders(
-            target_weights=target,
+            target=target,
             current=current,
             prices=prices,
             strategy_id="momentum",
@@ -3704,6 +3767,7 @@ import logging
 
 from alphapulse.trading.core.cost_model import CostModel
 from alphapulse.trading.core.models import Order, PortfolioSnapshot, Signal
+from alphapulse.trading.portfolio.models import TargetPortfolio
 from alphapulse.trading.portfolio.optimizer import PortfolioOptimizer
 from alphapulse.trading.portfolio.position_sizer import PositionSizer
 from alphapulse.trading.portfolio.rebalancer import Rebalancer
@@ -3747,8 +3811,8 @@ class PortfolioManager:
         allocations: dict[str, float],
         current: PortfolioSnapshot,
         prices: dict[str, float],
-    ) -> dict[str, float]:
-        """목표 포트폴리오 비중을 산출한다.
+    ) -> TargetPortfolio:
+        """목표 포트폴리오를 산출한다.
 
         Args:
             strategy_signals: 전략ID → Signal 리스트.
@@ -3757,7 +3821,7 @@ class PortfolioManager:
             prices: 종목코드 → 현재가.
 
         Returns:
-            종목코드 → 목표 비중 딕셔너리.
+            TargetPortfolio (목표 비중, 현금 비중, 전략 배분).
         """
         target_weights: dict[str, float] = {}
 
@@ -3777,11 +3841,19 @@ class PortfolioManager:
                 # 기존 비중과 합산 (다수 전략이 동일 종목 보유 가능)
                 target_weights[code] = target_weights.get(code, 0.0) + weight
 
-        return target_weights
+        total_position_weight = sum(target_weights.values())
+        cash_weight = max(0.0, 1.0 - total_position_weight)
+
+        return TargetPortfolio(
+            date=current.date,
+            positions=target_weights,
+            cash_weight=cash_weight,
+            strategy_allocations=dict(allocations),
+        )
 
     def generate_orders(
         self,
-        target_weights: dict[str, float],
+        target: TargetPortfolio,
         current: PortfolioSnapshot,
         prices: dict[str, float],
         strategy_id: str,
@@ -3789,7 +3861,7 @@ class PortfolioManager:
         """현재 → 목표 차이를 주문으로 변환한다.
 
         Args:
-            target_weights: 종목코드 → 목표 비중.
+            target: 목표 포트폴리오 (TargetPortfolio).
             current: 현재 포트폴리오 스냅샷.
             prices: 종목코드 → 현재가.
             strategy_id: 전략 ID.
@@ -3798,7 +3870,7 @@ class PortfolioManager:
             Order 리스트.
         """
         return self.rebalancer.generate_orders(
-            target_weights=target_weights,
+            target_weights=target.positions,
             current=current,
             prices=prices,
             strategy_id=strategy_id,
@@ -4547,6 +4619,7 @@ class TestPredefinedScenarios:
         assert "2022_rate_hike" in stress.SCENARIOS
         assert "flash_crash" in stress.SCENARIOS
         assert "won_crisis" in stress.SCENARIOS
+        assert "sector_collapse" in stress.SCENARIOS
 
     def test_covid_scenario(self, stress, portfolio):
         """COVID-19 시나리오 실행."""
@@ -4560,6 +4633,15 @@ class TestPredefinedScenarios:
         """일간 급락 시나리오."""
         result = stress.run(portfolio, "flash_crash")
         assert result.estimated_loss < 0
+
+    def test_sector_collapse_scenario(self, stress, portfolio):
+        """특정 섹터 붕괴 시나리오."""
+        result = stress.run(portfolio, "sector_collapse")
+        assert isinstance(result, StressResult)
+        assert result.scenario_name == "sector_collapse"
+        assert result.estimated_loss < 0
+        # 반도체 섹터 종목(삼성전자)이 더 큰 충격
+        assert "005930" in result.contributions
 
     def test_result_has_contributions(self, stress, portfolio):
         """종목별 손실 기여도 포���."""
@@ -4666,6 +4748,13 @@ class StressTest:
             "etf": -0.20,
             "desc": "원화 위기 + 외국인 이탈",
         },
+        "sector_collapse": {
+            "specific_sector": -0.50,
+            "kospi": -0.10,
+            "kosdaq": -0.15,
+            "etf": -0.10,
+            "desc": "특정 섹터 붕괴",
+        },
     }
 
     def run(
@@ -4697,7 +4786,11 @@ class StressTest:
         for pos in portfolio.positions:
             # 시장 유형에 따라 충격 적용
             market = pos.stock.market
-            if market == "ETF":
+
+            # 특정 섹터 붕괴 시나리오: 해당 섹터는 specific_sector 충격 적용
+            if "specific_sector" in shocks and pos.stock.sector:
+                shock = shocks.get("specific_sector", -0.50)
+            elif market == "ETF":
                 shock = shocks.get("etf", shocks.get("kospi", -0.10))
             elif market == "KOSDAQ":
                 shock = shocks.get("kosdaq", shocks.get("kospi", -0.10))
@@ -4750,13 +4843,271 @@ class StressTest:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/trading/risk/test_stress_test.py -v`
-Expected: 7 passed
+Expected: 8 passed
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add alphapulse/trading/risk/stress_test.py tests/trading/risk/test_stress_test.py
-git commit -m "feat(trading): add StressTest with 4 predefined scenarios + custom support"
+git commit -m "feat(trading): add StressTest with 5 predefined scenarios + custom support"
+```
+
+---
+
+### Task 18a: CorrelationAnalyzer (상관관계 분석 + 집중도)
+
+**Files:**
+- Create: `alphapulse/trading/risk/correlation.py`
+- Test: `tests/trading/risk/test_correlation.py`
+
+- [ ] **Step 1: Write failing test**
+
+`tests/trading/risk/test_correlation.py`:
+```python
+"""CorrelationAnalyzer 테스트."""
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from alphapulse.trading.core.models import PortfolioSnapshot, Position, Stock
+from alphapulse.trading.risk.correlation import CorrelationAnalyzer
+from alphapulse.trading.risk.limits import RiskAlert
+
+
+@pytest.fixture
+def analyzer():
+    return CorrelationAnalyzer()
+
+
+@pytest.fixture
+def samsung():
+    return Stock(code="005930", name="삼성전자", market="KOSPI", sector="반도체")
+
+
+@pytest.fixture
+def hynix():
+    return Stock(code="000660", name="SK하이닉스", market="KOSPI", sector="반도체")
+
+
+@pytest.fixture
+def kakao():
+    return Stock(code="035720", name="카카오", market="KOSPI", sector="IT")
+
+
+class TestCalculateCorrelationMatrix:
+    def test_identity_for_same_stock(self, analyzer):
+        """동일 종목은 상관계수 1.0."""
+        np.random.seed(42)
+        returns_data = {
+            "005930": np.random.normal(0, 0.02, 60),
+        }
+        corr = analyzer.calculate_correlation_matrix(returns_data)
+        assert corr.shape == (1, 1)
+        assert corr.iloc[0, 0] == pytest.approx(1.0)
+
+    def test_two_stocks(self, analyzer):
+        """2종목 상관 행렬 크기와 대칭성."""
+        np.random.seed(42)
+        base = np.random.normal(0, 0.02, 60)
+        returns_data = {
+            "005930": base + np.random.normal(0, 0.005, 60),
+            "000660": base + np.random.normal(0, 0.005, 60),
+        }
+        corr = analyzer.calculate_correlation_matrix(returns_data)
+        assert corr.shape == (2, 2)
+        assert corr.iloc[0, 1] == pytest.approx(corr.iloc[1, 0])
+
+    def test_high_correlation(self, analyzer):
+        """높은 상관관계 감지."""
+        np.random.seed(42)
+        base = np.random.normal(0, 0.02, 60)
+        returns_data = {
+            "005930": base,
+            "000660": base * 1.1 + np.random.normal(0, 0.001, 60),
+        }
+        corr = analyzer.calculate_correlation_matrix(returns_data)
+        assert corr.iloc[0, 1] > 0.8
+
+
+class TestCheckConcentration:
+    def test_high_correlation_alert(self, analyzer, samsung, hynix):
+        """높은 상관관계 종목 집중 시 경고."""
+        pos1 = Position(
+            stock=samsung, quantity=100, avg_price=72000,
+            current_price=72000, unrealized_pnl=0,
+            weight=0.40, strategy_id="momentum",
+        )
+        pos2 = Position(
+            stock=hynix, quantity=50, avg_price=180000,
+            current_price=180000, unrealized_pnl=0,
+            weight=0.40, strategy_id="momentum",
+        )
+        portfolio = PortfolioSnapshot(
+            date="20260409", cash=2_000_000,
+            positions=[pos1, pos2], total_value=10_000_000,
+            daily_return=0.0, cumulative_return=0.0, drawdown=0.0,
+        )
+        # 높은 상관관계 행렬
+        corr_matrix = pd.DataFrame(
+            [[1.0, 0.95], [0.95, 1.0]],
+            index=["005930", "000660"],
+            columns=["005930", "000660"],
+        )
+
+        alerts = analyzer.check_concentration(portfolio, corr_matrix)
+        assert len(alerts) >= 1
+        assert alerts[0].category == "correlation"
+
+    def test_low_correlation_no_alert(self, analyzer, samsung, kakao):
+        """낮은 상관관계면 경고 없음."""
+        pos1 = Position(
+            stock=samsung, quantity=100, avg_price=72000,
+            current_price=72000, unrealized_pnl=0,
+            weight=0.30, strategy_id="momentum",
+        )
+        pos2 = Position(
+            stock=kakao, quantity=50, avg_price=50000,
+            current_price=50000, unrealized_pnl=0,
+            weight=0.20, strategy_id="value",
+        )
+        portfolio = PortfolioSnapshot(
+            date="20260409", cash=5_000_000,
+            positions=[pos1, pos2], total_value=10_000_000,
+            daily_return=0.0, cumulative_return=0.0, drawdown=0.0,
+        )
+        corr_matrix = pd.DataFrame(
+            [[1.0, 0.20], [0.20, 1.0]],
+            index=["005930", "035720"],
+            columns=["005930", "035720"],
+        )
+
+        alerts = analyzer.check_concentration(portfolio, corr_matrix)
+        assert len(alerts) == 0
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/trading/risk/test_correlation.py -v`
+Expected: FAIL — `ModuleNotFoundError`
+
+- [ ] **Step 3: Implement**
+
+`alphapulse/trading/risk/correlation.py`:
+```python
+"""상관관계 분석 + 집중도 검사.
+
+포트폴리오 내 종목 간 상관관계를 분석하고,
+높은 상관관계 집중 시 경고를 생성한다.
+"""
+
+import logging
+
+import numpy as np
+import pandas as pd
+
+from alphapulse.trading.core.models import PortfolioSnapshot
+from alphapulse.trading.risk.limits import RiskAlert
+
+logger = logging.getLogger(__name__)
+
+# 상관관계 집중도 경고 임계값
+_CORRELATION_THRESHOLD = 0.80
+# 합산 비중 임계값 (높은 상관 종목 쌍의 비중 합)
+_WEIGHT_THRESHOLD = 0.40
+
+
+class CorrelationAnalyzer:
+    """포트폴리오 상관관계 분석기.
+
+    종목 간 상관관계를 계산하고, 높은 상관관계 집중 리스크를 감지한다.
+    """
+
+    def calculate_correlation_matrix(
+        self,
+        returns_data: dict[str, np.ndarray],
+    ) -> pd.DataFrame:
+        """종목 간 상관관계 행렬을 계산한다.
+
+        Args:
+            returns_data: 종목코드 → 일간 수익률 배열 매핑.
+
+        Returns:
+            상관관계 행렬 (pd.DataFrame).
+        """
+        codes = list(returns_data.keys())
+        df = pd.DataFrame(returns_data, columns=codes)
+        return df.corr()
+
+    def check_concentration(
+        self,
+        portfolio: PortfolioSnapshot,
+        corr_matrix: pd.DataFrame,
+        corr_threshold: float = _CORRELATION_THRESHOLD,
+        weight_threshold: float = _WEIGHT_THRESHOLD,
+    ) -> list[RiskAlert]:
+        """높은 상관관계 종목 집중도를 검사한다.
+
+        상관계수가 corr_threshold 이상인 종목 쌍의 비중 합이
+        weight_threshold를 초과하면 경고를 생성한다.
+
+        Args:
+            portfolio: 현재 포트폴리오 스냅샷.
+            corr_matrix: 상관관계 행렬.
+            corr_threshold: 상관관계 경고 임계값 (기본 0.80).
+            weight_threshold: 합산 비중 경고 임계값 (기본 0.40).
+
+        Returns:
+            RiskAlert 리스트.
+        """
+        alerts: list[RiskAlert] = []
+
+        # 포지션 비중 매핑
+        weight_map: dict[str, float] = {}
+        name_map: dict[str, str] = {}
+        for pos in portfolio.positions:
+            weight_map[pos.stock.code] = pos.weight
+            name_map[pos.stock.code] = pos.stock.name
+
+        codes = [c for c in weight_map if c in corr_matrix.columns]
+
+        # 모든 종목 쌍 순회
+        for i in range(len(codes)):
+            for j in range(i + 1, len(codes)):
+                code_a, code_b = codes[i], codes[j]
+                corr = corr_matrix.loc[code_a, code_b]
+                combined_weight = weight_map[code_a] + weight_map[code_b]
+
+                if corr >= corr_threshold and combined_weight >= weight_threshold:
+                    name_a = name_map.get(code_a, code_a)
+                    name_b = name_map.get(code_b, code_b)
+                    alerts.append(
+                        RiskAlert(
+                            level="WARNING",
+                            category="correlation",
+                            message=(
+                                f"{name_a}–{name_b} 상관계수 {corr:.2f}, "
+                                f"합산 비중 {combined_weight:.0%} > "
+                                f"한도 {weight_threshold:.0%}"
+                            ),
+                            current_value=corr,
+                            limit_value=corr_threshold,
+                        )
+                    )
+
+        return alerts
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/trading/risk/test_correlation.py -v`
+Expected: 5 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add alphapulse/trading/risk/correlation.py tests/trading/risk/test_correlation.py
+git commit -m "feat(trading): add CorrelationAnalyzer with concentration check"
 ```
 
 ---
@@ -5071,51 +5422,48 @@ class TestCheckOrder:
     def test_approve_normal_order(self, manager, samsung):
         """정상 주문 → APPROVE."""
         order = Order(
-            stock=samsung, side=Side.BUY, order_type="MARKET",
-            quantity=10, price=None, strategy_id="momentum",
+            stock=samsung, side=Side.BUY, order_type="LIMIT",
+            quantity=10, price=72000, strategy_id="momentum",
         )
         portfolio = PortfolioSnapshot(
             date="20260409", cash=5_000_000,
             positions=[], total_value=10_000_000,
             daily_return=0.0, cumulative_return=0.0, drawdown=0.0,
         )
-        prices = {"005930": 72000}
 
-        decision = manager.check_order(order, portfolio, prices)
+        decision = manager.check_order(order, portfolio)
         assert decision.action == RiskAction.APPROVE
 
     def test_reject_position_weight_exceeded(self, manager, samsung):
         """종목 비중 한도 초과 → REDUCE_SIZE."""
         order = Order(
-            stock=samsung, side=Side.BUY, order_type="MARKET",
-            quantity=200, price=None, strategy_id="momentum",
+            stock=samsung, side=Side.BUY, order_type="LIMIT",
+            quantity=200, price=72000, strategy_id="momentum",
         )
         portfolio = PortfolioSnapshot(
             date="20260409", cash=5_000_000,
             positions=[], total_value=10_000_000,
             daily_return=0.0, cumulative_return=0.0, drawdown=0.0,
         )
-        prices = {"005930": 72000}
         # 200 * 72000 = 14,400,000 > 10,000,000 * 10% = 1,000,000
 
-        decision = manager.check_order(order, portfolio, prices)
+        decision = manager.check_order(order, portfolio)
         assert decision.action in (RiskAction.REDUCE_SIZE, RiskAction.REJECT)
 
     def test_reject_during_warn_drawdown(self, manager, samsung):
         """WARN 드로다운 상태에서 매수 → REJECT."""
         manager.drawdown_mgr.update_peak(10_000_000)
         order = Order(
-            stock=samsung, side=Side.BUY, order_type="MARKET",
-            quantity=5, price=None, strategy_id="momentum",
+            stock=samsung, side=Side.BUY, order_type="LIMIT",
+            quantity=5, price=72000, strategy_id="momentum",
         )
         portfolio = PortfolioSnapshot(
             date="20260409", cash=4_000_000,
             positions=[], total_value=8_900_000,
             daily_return=-1.0, cumulative_return=-5.0, drawdown=-11.0,
         )
-        prices = {"005930": 72000}
 
-        decision = manager.check_order(order, portfolio, prices)
+        decision = manager.check_order(order, portfolio)
         assert decision.action == RiskAction.REJECT
         assert "드로다운" in decision.reason
 
@@ -5136,33 +5484,31 @@ class TestCheckOrder:
             positions=[pos], total_value=8_900_000,
             daily_return=-1.0, cumulative_return=-5.0, drawdown=-11.0,
         )
-        prices = {"005930": 72000}
 
-        decision = manager.check_order(order, portfolio, prices)
+        decision = manager.check_order(order, portfolio)
         assert decision.action == RiskAction.APPROVE
 
     def test_reject_daily_loss_exceeded(self, manager, samsung):
         """일간 손실 한도 초과 → REJECT."""
         order = Order(
-            stock=samsung, side=Side.BUY, order_type="MARKET",
-            quantity=5, price=None, strategy_id="momentum",
+            stock=samsung, side=Side.BUY, order_type="LIMIT",
+            quantity=5, price=72000, strategy_id="momentum",
         )
         portfolio = PortfolioSnapshot(
             date="20260409", cash=5_000_000,
             positions=[], total_value=10_000_000,
             daily_return=-3.5, cumulative_return=-5.0, drawdown=-5.0,
         )
-        prices = {"005930": 72000}
 
-        decision = manager.check_order(order, portfolio, prices)
+        decision = manager.check_order(order, portfolio)
         assert decision.action == RiskAction.REJECT
         assert "일간" in decision.reason or "손실" in decision.reason
 
     def test_reject_min_cash_violation(self, manager, samsung):
         """최소 현금 비율 위반 → REJECT."""
         order = Order(
-            stock=samsung, side=Side.BUY, order_type="MARKET",
-            quantity=10, price=None, strategy_id="momentum",
+            stock=samsung, side=Side.BUY, order_type="LIMIT",
+            quantity=10, price=72000, strategy_id="momentum",
         )
         # 현금 300,000 / 총자산 10,000,000 = 3% < 5%
         portfolio = PortfolioSnapshot(
@@ -5170,9 +5516,8 @@ class TestCheckOrder:
             positions=[], total_value=10_000_000,
             daily_return=0.0, cumulative_return=0.0, drawdown=0.0,
         )
-        prices = {"005930": 72000}
 
-        decision = manager.check_order(order, portfolio, prices)
+        decision = manager.check_order(order, portfolio)
         assert decision.action == RiskAction.REJECT
 
 
@@ -5213,6 +5558,7 @@ import logging
 
 from alphapulse.trading.core.enums import DrawdownAction, RiskAction, Side
 from alphapulse.trading.core.models import Order, PortfolioSnapshot
+from alphapulse.trading.risk.correlation import CorrelationAnalyzer
 from alphapulse.trading.risk.drawdown import DrawdownManager
 from alphapulse.trading.risk.limits import RiskAlert, RiskDecision, RiskLimits
 from alphapulse.trading.risk.report import RiskReport, RiskReportGenerator
@@ -5229,6 +5575,7 @@ class RiskManager:
         limits: 리스크 한도.
         var_calc: VaR 계산기.
         drawdown_mgr: 드로다운 관리자.
+        correlation_analyzer: 상관관계 분석기.
         stress_test: 스트레스 테스트.
         report_gen: 리포트 생성기.
     """
@@ -5249,6 +5596,7 @@ class RiskManager:
         self.limits = limits
         self.var_calc = var_calc
         self.drawdown_mgr = drawdown_mgr
+        self.correlation_analyzer = CorrelationAnalyzer()
         self.stress_test = StressTest()
         self.report_gen = RiskReportGenerator()
 
@@ -5256,9 +5604,11 @@ class RiskManager:
         self,
         order: Order,
         portfolio: PortfolioSnapshot,
-        prices: dict[str, float],
     ) -> RiskDecision:
         """주문 실행 전 리스크를 검증한다.
+
+        RiskChecker Protocol에 맞춰 prices 파라미터 없이 동작한다.
+        가격 정보는 포트폴리오의 포지션 데이터 또는 주문의 price 필드에서 조회한다.
 
         검증 순서:
         1. 일간 손실 한도
@@ -5270,7 +5620,6 @@ class RiskManager:
         Args:
             order: 검증할 주문.
             portfolio: 현재 포트폴리오.
-            prices: 종목코드 → 현재가.
 
         Returns:
             RiskDecision (APPROVE | REDUCE_SIZE | REJECT).
@@ -5319,7 +5668,13 @@ class RiskManager:
                 )
 
         # 4. 종목 비중 한도 체크
-        price = prices.get(order.stock.code, 0)
+        # 가격: 주문 price, 포지션 current_price, 순서로 조회
+        price = order.price or 0
+        if price == 0:
+            for pos in portfolio.positions:
+                if pos.stock.code == order.stock.code:
+                    price = pos.current_price
+                    break
         if price > 0 and portfolio.total_value > 0:
             # 현재 보유량 + 주문량
             current_qty = 0
@@ -5513,12 +5868,14 @@ __all__ = [
 
 from .attribution import PerformanceAttribution
 from .manager import PortfolioManager
+from .models import TargetPortfolio
 from .optimizer import PortfolioOptimizer
 from .position_sizer import PositionSizer
 from .rebalancer import Rebalancer
 from .store import PortfolioStore
 
 __all__ = [
+    "TargetPortfolio",
     "PositionSizer",
     "PortfolioOptimizer",
     "Rebalancer",
@@ -5532,6 +5889,7 @@ __all__ = [
 ```python
 """리스크 관리 엔진."""
 
+from .correlation import CorrelationAnalyzer
 from .drawdown import DrawdownManager
 from .limits import RiskAlert, RiskDecision, RiskLimits
 from .manager import RiskManager
@@ -5545,6 +5903,7 @@ __all__ = [
     "RiskAlert",
     "VaRCalculator",
     "DrawdownManager",
+    "CorrelationAnalyzer",
     "StressTest",
     "StressResult",
     "RiskReport",
@@ -5574,6 +5933,7 @@ from alphapulse.trading.core.models import (
     StrategySynthesis,
 )
 from alphapulse.trading.portfolio.manager import PortfolioManager
+from alphapulse.trading.portfolio.models import TargetPortfolio
 from alphapulse.trading.portfolio.optimizer import PortfolioOptimizer
 from alphapulse.trading.portfolio.position_sizer import PositionSizer
 from alphapulse.trading.portfolio.rebalancer import Rebalancer
@@ -5633,11 +5993,12 @@ def test_strategy_to_portfolio_to_risk():
         current=current,
         prices={"069500": 35000, "153130": 100000},
     )
-    assert len(target) > 0
+    assert isinstance(target, TargetPortfolio)
+    assert len(target.positions) > 0
 
     # 5. 주문 생성
     orders = pm.generate_orders(
-        target_weights=target,
+        target=target,
         current=current,
         prices={"069500": 35000, "153130": 100000},
         strategy_id="topdown_etf",
@@ -5653,10 +6014,7 @@ def test_strategy_to_portfolio_to_risk():
     )
 
     for order in orders:
-        decision = risk_mgr.check_order(
-            order, current,
-            prices={"069500": 35000, "153130": 100000},
-        )
+        decision = risk_mgr.check_order(order, current)
         assert decision.action in (
             RiskAction.APPROVE, RiskAction.REDUCE_SIZE,
         )
@@ -5752,8 +6110,15 @@ After completing all tasks, verify:
 - [ ] `scipy.optimize`가 `optimizer.py`에서 사용됨
 - [ ] `RiskManager.check_order()`가 `RiskDecision` 반환
 - [ ] `DrawdownManager`가 `peak_value` 추적 + `generate_deleverage_orders()` 구현
-- [ ] `StressTest`에 4개 사전 정의 시나리오 포함 (2020_covid, 2022_rate_hike, flash_crash, won_crisis)
+- [ ] `StressTest`에 5개 사전 정의 시나리오 포함 (2020_covid, 2022_rate_hike, flash_crash, won_crisis, sector_collapse)
 - [ ] `StrategyAllocator`가 `StrategySynthesis.allocation_adjustment` 반영
+- [ ] `TargetPortfolio` 데이터 클래스가 `portfolio/models.py`에 정의
+- [ ] `PortfolioManager.update_target()`이 `TargetPortfolio` 반환
+- [ ] `PortfolioManager.generate_orders()`가 `TargetPortfolio`를 인자로 받음
+- [ ] `CorrelationAnalyzer`가 `risk/correlation.py`에 구현
+- [ ] `RiskManager.check_order()`가 RiskChecker Protocol에 맞춰 `prices` 파라미터 없음
+- [ ] `BaseStrategy.should_rebalance()`에 `market_context: dict` 파라미터 포함
+- [ ] `StrategyAISynthesizer._fallback()`이 `self.base_allocations` 사용
 
 ---
 

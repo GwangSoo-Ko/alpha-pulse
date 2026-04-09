@@ -434,6 +434,9 @@ import requests
 logger = logging.getLogger(__name__)
 
 # 모의투자 / 실전 서버 URL
+# 포트 번호는 KIS API 공식 문서 기준 (모의투자 :29443, 실전 :9443).
+# KIS가 포트를 변경할 수 있으므로 최신 문서를 확인할 것.
+# NOTE: 설계 문서(spec)에는 포트 번호가 누락되어 있으므로 spec도 업데이트 필요.
 PAPER_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 LIVE_BASE_URL = "https://openapi.koreainvestment.com:9443"
 
@@ -2434,8 +2437,18 @@ class TestTradingEngineInit:
         """LIVE 모드에서 safeguard가 있으면 정상 생성."""
         mock_deps["safeguard"] = MagicMock()
         mock_deps["safeguard"].check_live_allowed.return_value = True
+        mock_deps["safeguard"].confirm_live_start.return_value = True
         engine = TradingEngine(mode=TradingMode.LIVE, **mock_deps)
         assert engine.mode == TradingMode.LIVE
+
+    def test_live_mode_calls_confirm(self, mock_deps):
+        """LIVE 모드에서 check_live_allowed + confirm_live_start 모두 호출."""
+        mock_deps["safeguard"] = MagicMock()
+        mock_deps["safeguard"].check_live_allowed.return_value = True
+        mock_deps["safeguard"].confirm_live_start.return_value = True
+        TradingEngine(mode=TradingMode.LIVE, **mock_deps)
+        mock_deps["safeguard"].check_live_allowed.assert_called_once()
+        mock_deps["safeguard"].confirm_live_start.assert_called_once()
 
 
 class TestRunDaily:
@@ -2660,8 +2673,10 @@ class TradingEngine:
         self.portfolio_store = portfolio_store
         self.safeguard = safeguard
 
+        # 이중 안전장치 (spec 섹션 10): env 스위치 + 터미널 확인
         if mode == TradingMode.LIVE:
             safeguard.check_live_allowed()
+            safeguard.confirm_live_start(broker.client.account_no)
 
     async def run_daily(self, date: str | None = None) -> dict:
         """일일 매매 사이클을 실행한다 — 5 Phase.
@@ -2894,7 +2909,7 @@ class TradingEngine:
 - [ ] **Step 5: 테스트 통과 확인**
 
 Run: `pytest tests/trading/orchestrator/test_engine.py -v`
-Expected: 10 passed
+Expected: 11 passed
 
 - [ ] **Step 6: 커밋**
 
@@ -3363,6 +3378,23 @@ class TestAlertFailureHandling:
         alert = TradingAlert(notifier=mock_notifier)
         # 예외 없이 완료
         await alert.risk_alert("테스트 알림")
+
+
+class TestWeeklyReport:
+    """주간 성과 리포트 테스트."""
+
+    @pytest.fixture
+    def alert(self, mock_notifier):
+        return TradingAlert(notifier=mock_notifier)
+
+    @pytest.mark.asyncio
+    async def test_weekly_report_sends(self, alert):
+        """주간 리포트를 텔레그램으로 전송한다."""
+        attribution = {"strategy_returns": {"topdown_etf": 0.012, "momentum": 0.008}}
+        await alert.weekly_report(attribution)
+        alert.notifier.send.assert_called_once()
+        msg = alert.notifier.send.call_args[1].get("analysis", str(alert.notifier.send.call_args))
+        assert "주간" in msg or "주간" in str(alert.notifier.send.call_args)
 ```
 
 - [ ] **Step 2: 테스트 실패 확인**
@@ -3573,7 +3605,7 @@ class TradingAlert:
 - [ ] **Step 4: 테스트 통과 확인**
 
 Run: `pytest tests/trading/orchestrator/test_alert.py -v`
-Expected: 6 passed
+Expected: 7 passed
 
 - [ ] **Step 5: 커밋**
 
@@ -4290,7 +4322,9 @@ Expected: FAIL -- `AttributeError: 'Config' object has no attribute 'KIS_IS_PAPE
 
 - [ ] **Step 3: Config에 Trading 설정 추가**
 
-`alphapulse/core/config.py`의 `__init__` 메서드 끝에 추가:
+`alphapulse/core/config.py` 변경:
+
+먼저 파일 상단(모듈 레벨)에 `import json` 추가. 그리고 `__init__` 메서드 끝에 추가:
 ```python
         # ── Trading: KIS API ─────────────────────────────────────
         self.KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "")
@@ -4306,7 +4340,7 @@ Expected: FAIL -- `AttributeError: 'Config' object has no attribute 'KIS_IS_PAPE
         self.MAX_DAILY_AMOUNT = int(os.environ.get("MAX_DAILY_AMOUNT", "50000000"))
 
         # ── Trading: 전략 설정 ─────────────────────────────────────
-        import json
+        # NOTE: `import json`은 파일 상단(모듈 레벨)에 추가할 것. __init__ 안에서 import하지 않는다.
         default_alloc = '{"topdown_etf":0.3,"momentum":0.4,"value":0.3}'
         alloc_str = os.environ.get("STRATEGY_ALLOCATIONS", default_alloc)
         try:
@@ -4446,23 +4480,24 @@ def run(mode, daemon):
     from alphapulse.trading.orchestrator.engine import TradingEngine
 
     cfg = Config()
-    trading_mode = TradingMode.LIVE if mode == "live" else TradingMode.PAPER
+    trading_mode = TradingMode(mode)
 
     click.echo(f"매매 모드: {mode}")
     click.echo(f"데몬: {'예' if daemon else '아니오 (1회 실행)'}")
 
-    # TradingEngine 구성은 실제 서브시스템 초기화 필요
-    # 여기서는 진입점만 제공
     click.echo("TradingEngine 초기화 중...")
+    engine = TradingEngine(mode=trading_mode)
 
     try:
         if daemon:
             from alphapulse.trading.orchestrator.scheduler import TradingScheduler
+            from alphapulse.trading.core.calendar import KRXCalendar
             click.echo("데몬 모드 시작 — Ctrl+C로 종료")
-            # asyncio.run(scheduler.run_daemon())
+            scheduler = TradingScheduler(engine=engine, calendar=KRXCalendar())
+            asyncio.run(scheduler.run_daemon())
         else:
             click.echo("1회 실행 시작")
-            # asyncio.run(engine.run_daily())
+            asyncio.run(engine.run_daily())
     except KeyboardInterrupt:
         click.echo("\n매매 중단")
     except Exception as e:
@@ -4492,15 +4527,45 @@ def reconcile():
     click.echo("DB/증권사 잔고 대사 실행")
 
     from alphapulse.core.config import Config
+    from alphapulse.trading.broker.kis_client import KISClient
+    from alphapulse.trading.orchestrator.recovery import RecoveryManager
 
     cfg = Config()
     if not cfg.KIS_APP_KEY:
         click.echo("KIS_APP_KEY가 설정되지 않았습니다.")
         return
 
+    client = KISClient(
+        app_key=cfg.KIS_APP_KEY,
+        app_secret=cfg.KIS_APP_SECRET,
+        account_no=cfg.KIS_ACCOUNT_NO,
+        is_paper=cfg.KIS_IS_PAPER,
+    )
+
+    # Broker 선택: 모의투자/실전에 따라
+    if cfg.KIS_IS_PAPER:
+        from alphapulse.trading.broker.paper_broker import PaperBroker
+        from alphapulse.trading.core.audit import AuditLogger
+        broker = PaperBroker(client=client, audit=AuditLogger())
+    else:
+        from alphapulse.trading.broker.kis_broker import KISBroker
+        from alphapulse.trading.core.audit import AuditLogger
+        broker = KISBroker(client=client, audit=AuditLogger())
+
+    # 포트폴리오 저장소는 기존 인프라 사용
+    from alphapulse.trading.portfolio.store import PortfolioStore
+    store = PortfolioStore()
+
+    mgr = RecoveryManager(broker=broker, store=store, alert=None)
     click.echo("대사 진행 중...")
-    # RecoveryManager 초기화 + reconcile() 호출
-    click.echo("대사 완료")
+    warnings = mgr.reconcile()
+
+    if warnings:
+        click.echo(f"불일치 {len(warnings)}건 발견:")
+        for w in warnings:
+            click.echo(f"  - {w}")
+    else:
+        click.echo("대사 완료: 불일치 없음")
 
 
 # ap trading portfolio 명령
@@ -4557,6 +4622,10 @@ def risk_limits():
     """현재 리스크 리밋 설정을 표시한다."""
     click.echo("리스크 리밋 설정")
     click.echo("=" * 40)
+
+# NOTE: `ap trading backtest` 명령은 Phase 3 계획에서 정의됨.
+#       `ap trading screen` 명령은 Phase 1 계획에서 정의됨.
+#       Phase 4 구현 시점에는 이 명령들이 이미 존재해야 한다.
 ```
 
 - [ ] **Step 4: 테스트 통과 확인**
@@ -4583,7 +4652,7 @@ git commit -m "feat(cli): add trading run/status/reconcile/portfolio/risk CLI co
 Phase 4 완료 후 검증:
 
 - [ ] `pytest tests/trading/broker/ -v` -- 브로커 테스트 전체 통과 (~46 tests)
-- [ ] `pytest tests/trading/orchestrator/ -v` -- 오케스트레이터 테스트 전체 통과 (~40 tests)
+- [ ] `pytest tests/trading/orchestrator/ -v` -- 오케스트레이터 테스트 전체 통과 (~42 tests)
 - [ ] `pytest tests/trading/ -v` -- Trading 전체 테스트 통과
 - [ ] `pytest tests/ -v` -- 기존 테스트 회귀 없음
 - [ ] `ruff check alphapulse/trading/broker/` -- 린트 에러 없음
@@ -4606,8 +4675,8 @@ Phase 4 완료 후 검증:
 | **Phase 1** | `trading/core/`, `trading/data/`, `trading/screening/` | `tests/trading/core/`, `tests/trading/data/`, `tests/trading/screening/` | ~43 |
 | **Phase 2** | `trading/strategy/`, `trading/portfolio/`, `trading/risk/` | `tests/trading/strategy/`, `tests/trading/portfolio/`, `tests/trading/risk/` | ~60 |
 | **Phase 3** | `trading/backtest/` | `tests/trading/backtest/` | ~30 |
-| **Phase 4** | `trading/broker/`, `trading/orchestrator/` | `tests/trading/broker/`, `tests/trading/orchestrator/` | ~86 |
-| **총계** | | `tests/trading/` | ~219 |
+| **Phase 4** | `trading/broker/`, `trading/orchestrator/` | `tests/trading/broker/`, `tests/trading/orchestrator/` | ~88 |
+| **총계** | | `tests/trading/` | ~221 |
 
 검증 명령:
 

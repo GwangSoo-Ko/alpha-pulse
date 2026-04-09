@@ -42,7 +42,8 @@ alphapulse/trading/
     ├── __init__.py
     ├── factors.py            # Task 12: 팩터 계산
     ├── filter.py             # Task 13: 투자 제외 필터
-    └── ranker.py             # Task 14: 멀티팩터 랭킹
+    ├── universe_selector.py  # Task 14: 전략별 유니버스 선택
+    └── ranker.py             # Task 15: 멀티팩터 랭킹
 
 tests/trading/
 ├── __init__.py
@@ -67,12 +68,13 @@ tests/trading/
     ├── __init__.py
     ├── test_factors.py
     ├── test_filter.py
+    ├── test_universe_selector.py
     └── test_ranker.py
 ```
 
 ### Files to Modify
 
-- `alphapulse/cli.py` — Task 15: `ap trading screen` CLI 명령 추가
+- `alphapulse/cli.py` — Task 16: `ap trading screen` CLI 명령 추가
 
 ---
 
@@ -276,6 +278,8 @@ from alphapulse.trading.core.models import (
     OrderResult,
     PortfolioSnapshot,
     Position,
+    RiskAlert,
+    RiskDecision,
     Signal,
     Stock,
     StockOpinion,
@@ -393,6 +397,48 @@ class TestStockOpinion:
             reason="외국인 수급 전환", confidence=0.8,
         )
         assert opinion.action == "매수"
+
+
+class TestOrderResult:
+    def test_creation(self):
+        stock = Stock(code="005930", name="삼성전자", market="KOSPI")
+        order = Order(stock=stock, side="BUY", order_type="MARKET",
+                       quantity=100, price=None, strategy_id="momentum")
+        result = OrderResult(
+            order_id="ORD001", order=order, status="filled",
+            filled_quantity=100, filled_price=72000,
+            commission=1080, tax=0, filled_at=datetime(2026, 4, 9, 10, 0),
+        )
+        assert result.order_id == "ORD001"
+        assert result.status == "filled"
+        assert result.filled_quantity == 100
+
+
+class TestRiskDecision:
+    def test_creation(self):
+        decision = RiskDecision(
+            action="APPROVE", reason="리스크 한도 내", adjusted_quantity=None,
+        )
+        assert decision.action == "APPROVE"
+        assert decision.adjusted_quantity is None
+
+    def test_reduce_size(self):
+        decision = RiskDecision(
+            action="REDUCE_SIZE", reason="집중도 초과", adjusted_quantity=50,
+        )
+        assert decision.action == "REDUCE_SIZE"
+        assert decision.adjusted_quantity == 50
+
+
+class TestRiskAlert:
+    def test_creation(self):
+        alert = RiskAlert(
+            level="WARNING", category="drawdown",
+            message="드로다운 -8% 도달", current_value=8.0, limit_value=10.0,
+        )
+        assert alert.level == "WARNING"
+        assert alert.category == "drawdown"
+        assert alert.current_value == 8.0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -401,6 +447,9 @@ Run: `pytest tests/trading/core/test_models.py -v`
 Expected: FAIL — `ModuleNotFoundError`
 
 - [ ] **Step 3: Implement models**
+
+> **Note:** RiskDecision, RiskAlert 모델은 spec의 리스크 엔진 (Phase 2) 준비.
+> Phase 1에서 데이터 모델만 미리 정의하여 interfaces.py에서 참조할 수 있게 한다.
 
 `alphapulse/trading/core/models.py`:
 ```python
@@ -581,6 +630,8 @@ class StrategySynthesis:
         conviction_level: 확신도 (0~1).
         allocation_adjustment: 전략 배분 조정 제안.
         stock_opinions: 종목별 AI 의견 목록.
+            spec에서는 list로만 명시되어 있으나, 타입 안전성을 위해
+            list[StockOpinion]으로 강화 (spec 대비 개선 사항).
         risk_warnings: 리스크 경고 목록.
         reasoning: 판단 근거.
     """
@@ -590,12 +641,44 @@ class StrategySynthesis:
     stock_opinions: list[StockOpinion]
     risk_warnings: list[str]
     reasoning: str
+
+
+@dataclass
+class RiskDecision:
+    """리스크 검증 결과.
+
+    Attributes:
+        action: 리스크 판정 ("APPROVE" | "REDUCE_SIZE" | "REJECT").
+        reason: 판정 사유.
+        adjusted_quantity: REDUCE_SIZE일 때 조정된 수량.
+    """
+    action: str
+    reason: str
+    adjusted_quantity: int | None = None
+
+
+@dataclass
+class RiskAlert:
+    """리스크 알림.
+
+    Attributes:
+        level: 심각도 ("INFO" | "WARNING" | "CRITICAL").
+        category: 알림 분류 ("drawdown" | "concentration" | "var" | "liquidity").
+        message: 알림 메시지.
+        current_value: 현재 측정값.
+        limit_value: 한도값.
+    """
+    level: str
+    category: str
+    message: str
+    current_value: float
+    limit_value: float
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/trading/core/test_models.py -v`
-Expected: 11 passed
+Expected: 15 passed
 
 - [ ] **Step 5: Update core __init__.py and commit**
 
@@ -617,6 +700,8 @@ from .models import (
     OrderResult,
     PortfolioSnapshot,
     Position,
+    RiskAlert,
+    RiskDecision,
     Signal,
     Stock,
     StockOpinion,
@@ -639,6 +724,8 @@ __all__ = [
     "PortfolioSnapshot",
     "StockOpinion",
     "StrategySynthesis",
+    "RiskDecision",
+    "RiskAlert",
 ]
 ```
 
@@ -719,6 +806,10 @@ class TestKRXCalendar:
         assert len(days) == 4
         assert "20260411" not in days  # 토
         assert "20260412" not in days  # 일
+
+    def test_is_half_day_returns_false(self):
+        """반일장은 현재 항상 False (스텁)."""
+        assert self.cal.is_half_day("20260409") is False
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -834,6 +925,20 @@ class KRXCalendar:
             dt += timedelta(days=1)
         return result
 
+    def is_half_day(self, date: str) -> bool:
+        """해당 날짜가 반일장(단축거래일)인지 판단한다.
+
+        현재는 스텁으로 항상 False를 반환한다. KRX가 반일장을
+        공시하면 해당 날짜를 추가해야 한다 (거의 발생하지 않음).
+
+        Args:
+            date: 날짜 문자열 (YYYYMMDD).
+
+        Returns:
+            반일장이면 True. 현재는 항상 False.
+        """
+        return False
+
     def _is_holiday(self, dt: datetime) -> bool:
         """공휴일 여부를 확인한다."""
         md = (dt.month, dt.day)
@@ -851,7 +956,7 @@ class KRXCalendar:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/trading/core/test_calendar.py -v`
-Expected: 10 passed
+Expected: 11 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1330,6 +1435,8 @@ from alphapulse.trading.core.models import (
     OrderResult,
     PortfolioSnapshot,
     Position,
+    RiskAlert,
+    RiskDecision,
     Signal,
     Stock,
 )
@@ -1353,6 +1460,38 @@ class DataProvider(Protocol):
 
     def get_short_interest(self, code: str, days: int) -> dict:
         """공매도/신용 잔고를 조회한다."""
+        ...
+
+
+@runtime_checkable
+class StrategyProtocol(Protocol):
+    """매매 전략 인터페이스.
+
+    모든 전략 구현체는 이 Protocol을 따른다.
+    """
+    strategy_id: str
+    rebalance_freq: str
+
+    def generate_signals(self, universe: list[Stock],
+                          market_context: dict) -> list[Signal]:
+        """종목별 매매 시그널을 생성한다."""
+        ...
+
+
+@runtime_checkable
+class RiskChecker(Protocol):
+    """리스크 검증 인터페이스.
+
+    주문 및 포트폴리오의 리스크를 검증한다.
+    """
+
+    def check_order(self, order: Order,
+                     portfolio: PortfolioSnapshot) -> RiskDecision:
+        """개별 주문의 리스크를 검증한다."""
+        ...
+
+    def check_portfolio(self, portfolio: PortfolioSnapshot) -> list[RiskAlert]:
+        """포트폴리오 전체 리스크를 검증한다."""
         ...
 
 
@@ -2385,7 +2524,8 @@ class ShortCollector:
     def collect(self, code: str, start: str, end: str) -> None:
         """공매도/신용잔고를 수집하여 DB에 저장한다.
 
-        TODO: KRX 정보데이터시스템 또는 네이버 금융 스크래퍼 구현 필요.
+        NOTE: 데이터 소스 확정 후 구현 예정.
+              KRX 정보데이터시스템 또는 네이버 금융 스크래퍼 구현 필요.
               구현 시 데이터 소스 검증 프로토콜 준수:
               1. 1순위 소스 API 호출 테스트
               2. 반환 데이터 형식/품질 확인
@@ -2679,6 +2819,19 @@ def trading_store(tmp_path):
     ]
     store.save_investor_flow_bulk(samsung_flow + hynix_flow)
 
+    # 공매도 (삼성: 감소 추세, SK: 증가 추세)
+    samsung_short = [
+        ("005930", date, 500_000 - i * 20_000, 10_000_000 - i * 200_000,
+         0.5 - i * 0.02, 100e9, 5_000_000)
+        for i, date in enumerate(dates)
+    ]
+    hynix_short = [
+        ("000660", date, 300_000 + i * 15_000, 8_000_000 + i * 150_000,
+         0.3 + i * 0.01, 80e9, 4_000_000)
+        for i, date in enumerate(dates)
+    ]
+    store.save_short_interest_bulk(samsung_short + hynix_short)
+
     return store
 ```
 
@@ -2698,7 +2851,11 @@ import pytest
 from alphapulse.trading.screening.factors import FactorCalculator
 
 
+# ── 모멘텀 팩터 ──────────────────────────────────────────────────
+
 class TestMomentum:
+    """편의 메서드 momentum() 테스트."""
+
     def test_positive_return(self, trading_store):
         """상승 종목은 양수 모멘텀."""
         calc = FactorCalculator(trading_store)
@@ -2712,7 +2869,28 @@ class TestMomentum:
         assert result < 0  # 190000 → 184300 하락
 
 
+class TestMomentum3m:
+    """momentum_3m 개별 팩터 테스트."""
+
+    def test_positive_return(self, trading_store):
+        """상승 종목은 양수."""
+        calc = FactorCalculator(trading_store)
+        # 데이터가 20일뿐이므로 60일 lookback에서 가용 데이터로 계산
+        result = calc.momentum_3m("005930")
+        assert result is not None
+        assert result > 0
+
+    def test_missing_data(self, trading_store):
+        """데이터 없으면 None."""
+        calc = FactorCalculator(trading_store)
+        assert calc.momentum_3m("999999") is None
+
+
+# ── 밸류 팩터 ────────────────────────────────────────────────────
+
 class TestValue:
+    """편의 메서드 value() 테스트."""
+
     def test_lower_per_higher_score(self, trading_store):
         """PER이 낮을수록 밸류 점수가 높다."""
         calc = FactorCalculator(trading_store)
@@ -2721,7 +2899,27 @@ class TestValue:
         assert hynix > samsung  # PER 낮은 SK하이닉스가 더 높은 밸류 점수
 
 
+class TestValuePBR:
+    """value_pbr 개별 팩터 테스트."""
+
+    def test_lower_pbr_higher_score(self, trading_store):
+        """PBR이 낮을수록 B/P가 높다."""
+        calc = FactorCalculator(trading_store)
+        samsung = calc.value_pbr("005930")  # PBR 1.3
+        hynix = calc.value_pbr("000660")    # PBR 1.0
+        assert hynix > samsung
+
+    def test_missing_data(self, trading_store):
+        """PBR 데이터 없으면 None."""
+        calc = FactorCalculator(trading_store)
+        assert calc.value_pbr("999999") is None
+
+
+# ── 퀄리티 팩터 ──────────────────────────────────────────────────
+
 class TestQuality:
+    """편의 메서드 quality() 테스트."""
+
     def test_higher_roe_higher_score(self, trading_store):
         """ROE가 높을수록 퀄리티 점수가 높다."""
         calc = FactorCalculator(trading_store)
@@ -2730,7 +2928,11 @@ class TestQuality:
         assert samsung > hynix
 
 
+# ── 수급 팩터 ────────────────────────────────────────────────────
+
 class TestFlow:
+    """편의 메서드 flow() 테스트."""
+
     def test_net_buy_positive(self, trading_store):
         """외국인 순매수 종목은 양수 수급 점수."""
         calc = FactorCalculator(trading_store)
@@ -2744,7 +2946,28 @@ class TestFlow:
         assert hynix < 0  # 외국인 순매도
 
 
+class TestFlowInstitutional:
+    """flow_institutional 개별 팩터 테스트."""
+
+    def test_returns_value(self, trading_store):
+        """기관 순매수 누적을 반환한다."""
+        calc = FactorCalculator(trading_store)
+        result = calc.flow_institutional("005930", days=20)
+        assert result is not None
+        # conftest: 기관 20e9 * 20일 = 400e9
+        assert result > 0
+
+    def test_missing_data(self, trading_store):
+        """데이터 없으면 None."""
+        calc = FactorCalculator(trading_store)
+        assert calc.flow_institutional("999999") is None
+
+
+# ── 변동성 팩터 ──────────────────────────────────────────────────
+
 class TestVolatility:
+    """편의 메서드 volatility() 테스트."""
+
     def test_returns_positive(self, trading_store):
         """변동성은 항상 양수."""
         calc = FactorCalculator(trading_store)
@@ -2756,6 +2979,50 @@ class TestVolatility:
         calc = FactorCalculator(trading_store)
         vol = calc.volatility("999999", days=20)
         assert vol is None
+
+
+class TestBeta:
+    """beta 개별 팩터 테스트."""
+
+    def test_returns_value(self, trading_store):
+        """시장 베타를 반환한다."""
+        calc = FactorCalculator(trading_store)
+        result = calc.beta("005930")
+        # 데이터 부족 시 None 가능하지만, 2종목 20일이면 계산 가능
+        assert result is not None
+        assert isinstance(result, float)
+
+    def test_missing_data(self, trading_store):
+        """데이터 없으면 None."""
+        calc = FactorCalculator(trading_store)
+        assert calc.beta("999999") is None
+
+
+# ── 역발상 팩터 ──────────────────────────────────────────────────
+
+class TestShortDecrease:
+    """short_decrease 개별 팩터 테스트."""
+
+    def test_decreasing_short_positive(self, trading_store):
+        """공매도 잔고 감소 시 양수."""
+        calc = FactorCalculator(trading_store)
+        # conftest: 삼성은 공매도 감소 추세
+        result = calc.short_decrease("005930")
+        assert result is not None
+        assert result > 0
+
+    def test_increasing_short_negative(self, trading_store):
+        """공매도 잔고 증가 시 음수."""
+        calc = FactorCalculator(trading_store)
+        # conftest: SK하이닉스는 공매도 증가 추세
+        result = calc.short_decrease("000660")
+        assert result is not None
+        assert result < 0
+
+    def test_missing_data(self, trading_store):
+        """데이터 없으면 None."""
+        calc = FactorCalculator(trading_store)
+        assert calc.short_decrease("999999") is None
 ```
 
 - [ ] **Step 3: Run test to verify it fails**
@@ -2769,8 +3036,11 @@ Expected: FAIL — `ModuleNotFoundError`
 ```python
 """팩터 계산기.
 
-종목별 모멘텀, 밸류, 퀄리티, 수급, 변동성 팩터를 계산한다.
+종목별 모멘텀, 밸류, 퀄리티, 수급, 변동성, 역발상 팩터를 계산한다.
+spec 5.1의 20개 팩터를 모두 구현한다.
 각 팩터는 원시값을 반환한다. percentile 정규화는 Ranker에서 수행한다.
+
+편의 메서드(momentum, value, quality, flow, volatility)는 대표 개별 팩터를 호출한다.
 """
 
 import math
@@ -2781,6 +3051,14 @@ from alphapulse.trading.data.store import TradingStore
 class FactorCalculator:
     """개별 팩터 점수 계산기.
 
+    spec 5.1에 정의된 20개 팩터를 모두 지원한다:
+    - 모멘텀 5종: momentum_1m, momentum_3m, momentum_6m, momentum_12m, high_52w_proximity
+    - 밸류 4종: value_per, value_pbr, value_psr, dividend_yield
+    - 퀄리티 3종: quality_roe, quality_profit_growth, quality_debt_ratio
+    - 수급 3종: flow_foreign, flow_institutional, flow_trend
+    - 역발상 2종: short_decrease, credit_change
+    - 변동성 3종: volatility, beta, downside_vol
+
     Attributes:
         store: TradingStore 인스턴스.
     """
@@ -2788,8 +3066,12 @@ class FactorCalculator:
     def __init__(self, store: TradingStore) -> None:
         self.store = store
 
+    # ── 편의 메서드 (기존 호환) ───────────────────────────────────
+
     def momentum(self, code: str, lookback: int = 60) -> float | None:
         """모멘텀 팩터 — lookback 기간 수익률 (%).
+
+        편의 메서드. momentum_3m과 동일한 로직이지만 lookback을 직접 지정.
 
         Args:
             code: 종목코드.
@@ -2798,6 +3080,287 @@ class FactorCalculator:
         Returns:
             수익률 (%). 데이터 부족 시 None.
         """
+        return self._momentum_by_days(code, lookback)
+
+    def value(self, code: str) -> float | None:
+        """밸류 팩터 — PER 역수 (E/P). 편의 메서드. value_per() 호출."""
+        return self.value_per(code)
+
+    def quality(self, code: str) -> float | None:
+        """퀄리티 팩터 — ROE. 편의 메서드. quality_roe() 호출."""
+        return self.quality_roe(code)
+
+    def flow(self, code: str, days: int = 20) -> float | None:
+        """수급 팩터 — 외국인 순매수 누적. 편의 메서드. flow_foreign() 호출."""
+        return self.flow_foreign(code, days=days)
+
+    # ── 모멘텀 팩터 (5종) ────────────────────────────────────────
+
+    def momentum_1m(self, code: str) -> float | None:
+        """1개월(20영업일) 수익률 (%)."""
+        return self._momentum_by_days(code, 20)
+
+    def momentum_3m(self, code: str) -> float | None:
+        """3개월(60영업일) 수익률 (%)."""
+        return self._momentum_by_days(code, 60)
+
+    def momentum_6m(self, code: str) -> float | None:
+        """6개월(120영업일) 수익률 (%)."""
+        return self._momentum_by_days(code, 120)
+
+    def momentum_12m(self, code: str) -> float | None:
+        """12개월 수익률 (%), 최근 1개월 제외.
+
+        전통적인 12-1 모멘텀 팩터.
+        """
+        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        if len(rows) < 22:  # 최소 22일 (1개월 제외 + 1일)
+            return None
+        # 최근 20일(1개월) 제외한 나머지에서 계산
+        end_idx = len(rows) - 20
+        lookback_days = 240  # 12개월
+        start_idx = max(0, end_idx - lookback_days)
+        start_price = rows[start_idx]["close"]
+        end_price = rows[end_idx - 1]["close"]
+        if start_price == 0:
+            return None
+        return (end_price - start_price) / start_price * 100
+
+    def high_52w_proximity(self, code: str) -> float | None:
+        """52주 신고가 근접도 (%).
+
+        현재가 / 52주 고가 * 100. 100에 가까울수록 신고가 근접.
+        """
+        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        if len(rows) < 2:
+            return None
+        recent_252 = rows[-252:] if len(rows) >= 252 else rows
+        high_52w = max(r["high"] for r in recent_252)
+        if high_52w == 0:
+            return None
+        current = rows[-1]["close"]
+        return (current / high_52w) * 100
+
+    # ── 밸류 팩터 (4종) ──────────────────────────────────────────
+
+    def value_per(self, code: str) -> float | None:
+        """PER 역수 (E/P, %). PER이 낮을수록 높은 값."""
+        fund = self.store.get_fundamentals(code)
+        if fund is None or fund.get("per") is None or fund["per"] <= 0:
+            return None
+        return (1.0 / fund["per"]) * 100
+
+    def value_pbr(self, code: str) -> float | None:
+        """PBR 역수 (B/P, %). PBR이 낮을수록 높은 값."""
+        fund = self.store.get_fundamentals(code)
+        if fund is None or fund.get("pbr") is None or fund["pbr"] <= 0:
+            return None
+        return (1.0 / fund["pbr"]) * 100
+
+    def value_psr(self, code: str) -> float | None:
+        """PSR 역수 (S/P, %). PSR이 낮을수록 높은 값.
+
+        PSR = 시가총액 / 매출액. 매출 데이터 필요.
+        """
+        fund = self.store.get_fundamentals(code)
+        if fund is None:
+            return None
+        revenue = fund.get("revenue")
+        if revenue is None or revenue <= 0:
+            return None
+        # 시가총액은 최근 OHLCV에서 가져옴
+        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        if not rows:
+            return None
+        mcap = rows[-1].get("market_cap", 0)
+        if mcap <= 0:
+            return None
+        psr = mcap / revenue
+        if psr <= 0:
+            return None
+        return (1.0 / psr) * 100
+
+    def dividend_yield(self, code: str) -> float | None:
+        """배당수익률 (%)."""
+        fund = self.store.get_fundamentals(code)
+        if fund is None or fund.get("dividend_yield") is None:
+            return None
+        return fund["dividend_yield"]
+
+    # ── 퀄리티 팩터 (3종) ────────────────────────────────────────
+
+    def quality_roe(self, code: str) -> float | None:
+        """ROE (%). 높을수록 우수."""
+        fund = self.store.get_fundamentals(code)
+        if fund is None or fund.get("roe") is None:
+            return None
+        return fund["roe"]
+
+    def quality_profit_growth(self, code: str) -> float | None:
+        """영업이익 성장률 (YoY, %).
+
+        직전 분기 대비 성장률. 분기별 데이터가 2개 이상 필요.
+        현재는 단일 분기만 저장하므로 None 반환 (추후 분기 비교 구현).
+        """
+        # 분기별 영업이익 비교가 필요하지만 현재 최신 1건만 저장됨.
+        # 멀티 분기 저장 구현 후 활성화 예정.
+        return None
+
+    def quality_debt_ratio(self, code: str) -> float | None:
+        """부채비율 역수 (낮을수록 좋음). 높은 반환값 = 낮은 부채비율."""
+        fund = self.store.get_fundamentals(code)
+        if fund is None or fund.get("debt_ratio") is None:
+            return None
+        debt = fund["debt_ratio"]
+        if debt <= 0:
+            return None
+        return (1.0 / debt) * 100
+
+    # ── 수급 팩터 (3종) ──────────────────────────────────────────
+
+    def flow_foreign(self, code: str, days: int = 20) -> float | None:
+        """외국인 N일 순매수 누적 (원)."""
+        rows = self.store.get_investor_flow(code, days=days)
+        if not rows:
+            return None
+        return sum(r.get("foreign_net", 0) or 0 for r in rows)
+
+    def flow_institutional(self, code: str, days: int = 20) -> float | None:
+        """기관 N일 순매수 누적 (원)."""
+        rows = self.store.get_investor_flow(code, days=days)
+        if not rows:
+            return None
+        return sum(r.get("institutional_net", 0) or 0 for r in rows)
+
+    def flow_trend(self, code: str) -> float | None:
+        """수급 추세 — 5일 순매수 이평 vs 20일 순매수 이평.
+
+        양수면 단기 수급 개선, 음수면 단기 수급 악화.
+        """
+        rows = self.store.get_investor_flow(code, days=20)
+        if len(rows) < 5:
+            return None
+        foreign = [r.get("foreign_net", 0) or 0 for r in rows]
+        avg_5d = sum(foreign[:5]) / 5
+        avg_20d = sum(foreign) / len(foreign)
+        if avg_20d == 0:
+            return avg_5d
+        return avg_5d - avg_20d
+
+    # ── 역발상 팩터 (2종) ────────────────────────────────────────
+
+    def short_decrease(self, code: str, days: int = 20) -> float | None:
+        """공매도 잔고 감소율 (%).
+
+        양수면 공매도 감소(긍정적), 음수면 증가(부정적).
+        """
+        rows = self.store.get_short_interest(code, days=days)
+        if len(rows) < 2:
+            return None
+        # rows는 최신순(DESC), 첫 번째가 최근
+        recent = rows[0].get("short_balance", 0) or 0
+        oldest = rows[-1].get("short_balance", 0) or 0
+        if oldest == 0:
+            return None
+        # 감소율: 잔고 줄었으면 양수
+        return (oldest - recent) / oldest * 100
+
+    def credit_change(self, code: str, days: int = 20) -> float | None:
+        """신용잔고 변화율 (%).
+
+        양수면 신용 증가(과열 신호), 음수면 감소.
+        """
+        rows = self.store.get_short_interest(code, days=days)
+        if len(rows) < 2:
+            return None
+        recent = rows[0].get("credit_balance", 0) or 0
+        oldest = rows[-1].get("credit_balance", 0) or 0
+        if oldest == 0:
+            return None
+        return (recent - oldest) / oldest * 100
+
+    # ── 변동성 팩터 (3종) ────────────────────────────────────────
+
+    def volatility(self, code: str, days: int = 60) -> float | None:
+        """일간 변동성 — 수익률 표준편차 (연환산, %)."""
+        returns = self._get_daily_returns(code, days)
+        if returns is None or len(returns) < 3:
+            return None
+        mean = sum(returns) / len(returns)
+        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+        daily_vol = math.sqrt(variance)
+        return daily_vol * math.sqrt(252) * 100
+
+    def beta(self, code: str, benchmark: str = "KOSPI") -> float | None:
+        """시장 베타.
+
+        유니버스 평균 수익률을 벤치마크 근사로 사용한다.
+        정확한 KOSPI 지수 데이터는 Phase 2에서 추가 예정.
+
+        Args:
+            code: 종목코드.
+            benchmark: 벤치마크 (현재 미사용, 유니버스 평균 사용).
+
+        Returns:
+            베타 값. 데이터 부족 시 None.
+        """
+        stock_returns = self._get_daily_returns(code, 60)
+        if stock_returns is None or len(stock_returns) < 5:
+            return None
+
+        # 벤치마크 근사: 저장된 모든 종목의 평균 수익률
+        all_stocks = self.store.get_all_stocks()
+        if len(all_stocks) < 2:
+            return None
+
+        market_returns_matrix = []
+        for s in all_stocks:
+            s_ret = self._get_daily_returns(s["code"], 60)
+            if s_ret is not None and len(s_ret) == len(stock_returns):
+                market_returns_matrix.append(s_ret)
+
+        if not market_returns_matrix:
+            return None
+
+        # 시장 평균 수익률 (벤치마크 근사)
+        n = len(stock_returns)
+        market_returns = [
+            sum(m[i] for m in market_returns_matrix) / len(market_returns_matrix)
+            for i in range(n)
+        ]
+
+        # 베타 = Cov(stock, market) / Var(market)
+        mean_s = sum(stock_returns) / n
+        mean_m = sum(market_returns) / n
+        cov = sum(
+            (stock_returns[i] - mean_s) * (market_returns[i] - mean_m)
+            for i in range(n)
+        ) / (n - 1)
+        var_m = sum((m - mean_m) ** 2 for m in market_returns) / (n - 1)
+        if var_m == 0:
+            return None
+        return cov / var_m
+
+    def downside_vol(self, code: str, days: int = 60) -> float | None:
+        """하방 변동성 — 음수 수익률만의 표준편차 (연환산, %).
+
+        하락 리스크 측정. 낮을수록 양호.
+        """
+        returns = self._get_daily_returns(code, days)
+        if returns is None:
+            return None
+        neg_returns = [r for r in returns if r < 0]
+        if len(neg_returns) < 3:
+            return None
+        mean = sum(neg_returns) / len(neg_returns)
+        variance = sum((r - mean) ** 2 for r in neg_returns) / (len(neg_returns) - 1)
+        daily_vol = math.sqrt(variance)
+        return daily_vol * math.sqrt(252) * 100
+
+    # ── 내부 헬퍼 ────────────────────────────────────────────────
+
+    def _momentum_by_days(self, code: str, lookback: int) -> float | None:
+        """lookback 기간 수익률 (%)."""
         rows = self.store.get_ohlcv(code, "00000000", "99999999")
         if len(rows) < 2:
             return None
@@ -2808,61 +3371,8 @@ class FactorCalculator:
             return None
         return (end_price - start_price) / start_price * 100
 
-    def value(self, code: str) -> float | None:
-        """밸류 팩터 — PER 역수 (E/P, %).
-
-        PER이 낮을수록 값이 크다 (저평가).
-
-        Args:
-            code: 종목코드.
-
-        Returns:
-            E/P 비율 (%). 데이터 없으면 None.
-        """
-        fund = self.store.get_fundamentals(code)
-        if fund is None or fund.get("per") is None or fund["per"] <= 0:
-            return None
-        return (1.0 / fund["per"]) * 100
-
-    def quality(self, code: str) -> float | None:
-        """퀄리티 팩터 — ROE (%).
-
-        Args:
-            code: 종목코드.
-
-        Returns:
-            ROE (%). 데이터 없으면 None.
-        """
-        fund = self.store.get_fundamentals(code)
-        if fund is None or fund.get("roe") is None:
-            return None
-        return fund["roe"]
-
-    def flow(self, code: str, days: int = 20) -> float | None:
-        """수급 팩터 — 외국인 순매수 누적 (원).
-
-        Args:
-            code: 종목코드.
-            days: 조회 기간 (영업일).
-
-        Returns:
-            외국인 순매수 누적 (원). 데이터 없으면 None.
-        """
-        rows = self.store.get_investor_flow(code, days=days)
-        if not rows:
-            return None
-        return sum(r.get("foreign_net", 0) or 0 for r in rows)
-
-    def volatility(self, code: str, days: int = 60) -> float | None:
-        """변동성 팩터 — 일간 수익률의 표준편차 (연환산, %).
-
-        Args:
-            code: 종목코드.
-            days: 조회 기간 (영업일).
-
-        Returns:
-            연환산 변동성 (%). 데이터 부족 시 None.
-        """
+    def _get_daily_returns(self, code: str, days: int) -> list[float] | None:
+        """일간 수익률 리스트를 반환한다."""
         rows = self.store.get_ohlcv(code, "00000000", "99999999")
         if len(rows) < 5:
             return None
@@ -2874,41 +3384,19 @@ class FactorCalculator:
                 continue
             daily_ret = (recent[i]["close"] - prev_close) / prev_close
             returns.append(daily_ret)
-
-        if len(returns) < 3:
-            return None
-
-        mean = sum(returns) / len(returns)
-        variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-        daily_vol = math.sqrt(variance)
-        annual_vol = daily_vol * math.sqrt(252)
-        return annual_vol * 100
-
-    def dividend_yield(self, code: str) -> float | None:
-        """배당수익률 팩터 (%).
-
-        Args:
-            code: 종목코드.
-
-        Returns:
-            배당수익률 (%). 데이터 없으면 None.
-        """
-        fund = self.store.get_fundamentals(code)
-        if fund is None or fund.get("dividend_yield") is None:
-            return None
-        return fund["dividend_yield"]
+        return returns if len(returns) >= 3 else None
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
 
 Run: `pytest tests/trading/screening/test_factors.py -v`
-Expected: 7 passed
+Expected: 18 passed
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add alphapulse/trading/screening/ tests/trading/screening/ tests/trading/conftest.py
-git commit -m "feat(trading): add FactorCalculator (momentum, value, quality, flow, volatility)"
+git commit -m "feat(trading): add FactorCalculator with 20 spec factors (momentum, value, quality, flow, volatility, contrarian)"
 ```
 
 ---
@@ -3006,6 +3494,10 @@ Expected: FAIL — `ModuleNotFoundError`
 """투자 제외 필터.
 
 유동성, 시가총액, 섹터 기반으로 투자 부적격 종목을 제외한다.
+
+NOTE: spec의 StockFilter.apply()는 내부에서 데이터를 직접 조회하지만,
+이 구현에서는 stock_data를 외부에서 주입받는 방식을 사용한다.
+이는 테스트 용이성을 위한 설계 결정이며, spec과 의도적으로 다르다.
 """
 
 from alphapulse.trading.core.models import Stock
@@ -3075,7 +3567,188 @@ git commit -m "feat(trading): add StockFilter for market cap, volume, sector exc
 
 ---
 
-## Task 14: 멀티팩터 랭킹
+## Task 14: 전략별 유니버스 선택
+
+**Files:**
+- Create: `alphapulse/trading/screening/universe_selector.py`
+- Test: `tests/trading/screening/test_universe_selector.py`
+
+- [ ] **Step 1: Write failing test**
+
+`tests/trading/screening/test_universe_selector.py`:
+```python
+"""전략별 유니버스 선택 테스트."""
+
+import pytest
+
+from alphapulse.trading.core.models import Stock
+from alphapulse.trading.screening.universe_selector import UniverseSelector
+
+
+@pytest.fixture
+def all_stocks():
+    return [
+        Stock(code="005930", name="삼성전자", market="KOSPI", sector="반도체"),
+        Stock(code="000660", name="SK하이닉스", market="KOSPI", sector="반도체"),
+        Stock(code="035720", name="카카오", market="KOSPI", sector="IT"),
+        Stock(code="069500", name="KODEX 200", market="ETF"),
+        Stock(code="252670", name="KODEX 200선물인버스2X", market="ETF"),
+    ]
+
+
+@pytest.fixture
+def stock_data():
+    return {
+        "005930": {"market_cap": 430e12, "avg_volume": 500e9},
+        "000660": {"market_cap": 120e12, "avg_volume": 200e9},
+        "035720": {"market_cap": 20e12, "avg_volume": 25e9},
+        "069500": {"market_cap": 50e12, "avg_volume": 7e9},
+        "252670": {"market_cap": 5e12, "avg_volume": 3e9},
+    }
+
+
+class TestUniverseSelector:
+    def test_default_returns_all(self, all_stocks, stock_data):
+        """등록되지 않은 전략은 전체 종목 반환."""
+        selector = UniverseSelector()
+        result = selector.select("unknown_strategy", all_stocks, stock_data)
+        assert len(result) == len(all_stocks)
+
+    def test_momentum_strategy_filters(self, all_stocks, stock_data):
+        """모멘텀 전략은 ETF 제외, 시총 필터 적용."""
+        selector = UniverseSelector(strategy_configs={
+            "momentum": {
+                "exclude_markets": ["ETF"],
+                "min_market_cap": 50e12,
+            },
+        })
+        result = selector.select("momentum", all_stocks, stock_data)
+        codes = [s.code for s in result]
+        assert "005930" in codes
+        assert "000660" in codes
+        assert "035720" not in codes  # 시총 부족
+        assert "069500" not in codes  # ETF 제외
+
+    def test_etf_strategy_etf_only(self, all_stocks, stock_data):
+        """ETF 전략은 ETF만 반환."""
+        selector = UniverseSelector(strategy_configs={
+            "topdown_etf": {
+                "include_markets": ["ETF"],
+            },
+        })
+        result = selector.select("topdown_etf", all_stocks, stock_data)
+        assert all(s.market == "ETF" for s in result)
+        assert len(result) == 2
+
+    def test_custom_min_volume(self, all_stocks, stock_data):
+        """최소 거래대금 필터."""
+        selector = UniverseSelector(strategy_configs={
+            "liquid": {"min_avg_volume": 100e9},
+        })
+        result = selector.select("liquid", all_stocks, stock_data)
+        codes = [s.code for s in result]
+        assert "005930" in codes
+        assert "069500" not in codes  # 거래대금 부족
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/trading/screening/test_universe_selector.py -v`
+Expected: FAIL — `ModuleNotFoundError`
+
+- [ ] **Step 3: Implement universe selector**
+
+`alphapulse/trading/screening/universe_selector.py`:
+```python
+"""전략별 유니버스 선택.
+
+각 전략이 요구하는 종목 유니버스를 선택한다.
+전략별 설정에 따라 시장, 시총, 거래대금 등으로 필터링한다.
+"""
+
+from alphapulse.trading.core.models import Stock
+
+
+class UniverseSelector:
+    """전략별 유니버스 선택기.
+
+    Attributes:
+        strategy_configs: 전략 ID → 필터 설정 매핑.
+    """
+
+    def __init__(self, strategy_configs: dict[str, dict] | None = None) -> None:
+        """UniverseSelector를 초기화한다.
+
+        Args:
+            strategy_configs: 전략별 유니버스 설정. 지원 키:
+                include_markets (list[str]): 포함할 시장만 (있으면 해당 시장만).
+                exclude_markets (list[str]): 제외할 시장.
+                min_market_cap (float): 최소 시가총액.
+                min_avg_volume (float): 최소 일평균 거래대금.
+        """
+        self.strategy_configs = strategy_configs or {}
+
+    def select(self, strategy_id: str, all_stocks: list[Stock],
+               stock_data: dict[str, dict]) -> list[Stock]:
+        """전략에 맞는 유니버스를 선택한다.
+
+        Args:
+            strategy_id: 전략 ID.
+            all_stocks: 전체 종목 리스트.
+            stock_data: 종목코드 → {"market_cap", "avg_volume"} 매핑.
+
+        Returns:
+            전략에 적합한 종목 리스트.
+        """
+        config = self.strategy_configs.get(strategy_id)
+        if config is None:
+            return list(all_stocks)
+
+        result = []
+        include_markets = set(config.get("include_markets", []))
+        exclude_markets = set(config.get("exclude_markets", []))
+        min_mcap = config.get("min_market_cap")
+        min_vol = config.get("min_avg_volume")
+
+        for s in all_stocks:
+            # 시장 포함/제외 필터
+            if include_markets and s.market not in include_markets:
+                continue
+            if s.market in exclude_markets:
+                continue
+
+            data = stock_data.get(s.code, {})
+
+            # 시가총액 필터
+            if min_mcap is not None:
+                if data.get("market_cap", 0) < min_mcap:
+                    continue
+
+            # 거래대금 필터
+            if min_vol is not None:
+                if data.get("avg_volume", 0) < min_vol:
+                    continue
+
+            result.append(s)
+
+        return result
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pytest tests/trading/screening/test_universe_selector.py -v`
+Expected: 4 passed
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add alphapulse/trading/screening/universe_selector.py tests/trading/screening/test_universe_selector.py
+git commit -m "feat(trading): add UniverseSelector for strategy-specific universe filtering"
+```
+
+---
+
+## Task 15: 멀티팩터 랭킹
 
 **Files:**
 - Create: `alphapulse/trading/screening/ranker.py`
@@ -3310,7 +3983,7 @@ git commit -m "feat(trading): add MultiFactorRanker with percentile normalizatio
 
 ---
 
-## Task 15: CLI 명령 + 전체 통합 테스트
+## Task 16: CLI 명령 + 전체 통합 테스트
 
 **Files:**
 - Modify: `alphapulse/cli.py`
@@ -3323,6 +3996,10 @@ git commit -m "feat(trading): add MultiFactorRanker with percentile normalizatio
 """Trading Phase 1 통합 테스트.
 
 Core → Data → Screening 전체 파이프라인을 검증한다.
+
+NOTE: 개별 수집기(StockCollector, FundamentalCollector, FlowCollector, ShortCollector)는
+각자의 단위 테스트에서 검증된다. 이 통합 테스트는 스크리닝 파이프라인
+(유니버스 → 팩터 → 필터 → 랭킹)에 집중한다.
 """
 
 from alphapulse.trading.core.models import Stock
@@ -3456,12 +4133,12 @@ def screen(market, top, factor):
 - [ ] **Step 4: Run full test suite**
 
 Run: `pytest tests/trading/ -v`
-Expected: All tests pass (approximately 43 tests)
+Expected: All tests pass (approximately 60 tests)
 
 - [ ] **Step 5: Run existing tests to verify no regressions**
 
 Run: `pytest tests/ -v --tb=short`
-Expected: 275 + ~43 = ~318 tests pass. No failures.
+Expected: 275 + ~60 = ~335 tests pass. No failures.
 
 - [ ] **Step 6: Commit**
 

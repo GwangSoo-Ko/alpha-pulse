@@ -278,6 +278,22 @@ class HistoricalDataFeed:
     def get_available_codes(self) -> list[str]:
         """등록된 종목 코드 목록을 반환한다."""
         return list(self._all_data.keys())
+
+    # --- DataProvider Protocol stub methods ---
+    # HistoricalDataFeed는 백테스트 데이터 피드이므로 재무, 수급, 공매도 데이터를
+    # 직접 제공하지 않는다. DataProvider Protocol 구조적 호환을 위해 빈 dict 반환.
+
+    def get_financials(self, code: str) -> dict:
+        """재무제표 (DataProvider stub — 백테스트에서는 미사용)."""
+        return {}
+
+    def get_investor_flow(self, code: str, days: int) -> dict:
+        """투자자별 매매동향 (DataProvider stub — 백테스트에서는 미사용)."""
+        return {}
+
+    def get_short_interest(self, code: str, days: int) -> dict:
+        """공매도 잔고 (DataProvider stub — 백테스트에서는 미사용)."""
+        return {}
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -643,6 +659,14 @@ class TestSlippage:
         result = broker.submit_order(order)
         # fixed 슬리피지: 종가 * (1 + slippage) → 72500보다 높아야
         assert result.filled_price >= 72500
+
+
+class TestProtocolConformance:
+    def test_implements_broker_protocol(self, broker):
+        """SimBroker가 Broker Protocol을 구현한다."""
+        from alphapulse.trading.core.interfaces import Broker
+
+        assert isinstance(broker, Broker)
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -666,7 +690,7 @@ from datetime import datetime
 from alphapulse.trading.backtest.data_feed import HistoricalDataFeed
 from alphapulse.trading.core.cost_model import CostModel
 from alphapulse.trading.core.enums import OrderType, Side
-from alphapulse.trading.core.models import Order, OrderResult, Position
+from alphapulse.trading.core.models import Order, OrderResult, Position, Stock
 
 
 class SimBroker:
@@ -894,7 +918,7 @@ class SimBroker:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/trading/backtest/test_sim_broker.py -v`
-Expected: 22 passed
+Expected: 23 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1029,6 +1053,24 @@ class TestReturnMetrics:
         """CAGR이 양수이다."""
         result = metrics.calculate(sample_snapshots, np.array([0.003] * 15))
         assert result["cagr"] > 0
+
+
+class TestMonthlyReturns:
+    def test_monthly_returns_is_list(self, metrics, sample_snapshots):
+        """monthly_returns가 리스트로 반환된다."""
+        result = metrics.calculate(sample_snapshots, np.array([0.003] * 15))
+        assert "monthly_returns" in result
+        assert isinstance(result["monthly_returns"], list)
+
+    def test_monthly_returns_empty_on_single_snapshot(self, metrics):
+        """스냅샷 1개 → monthly_returns 빈 리스트."""
+        snap = PortfolioSnapshot(
+            date="20260406", cash=100_000_000, positions=[],
+            total_value=100_000_000, daily_return=0.0,
+            cumulative_return=0.0, drawdown=0.0,
+        )
+        result = metrics.calculate([snap], np.array([0.0]))
+        assert result["monthly_returns"] == []
 
 
 class TestRiskMetrics:
@@ -1187,9 +1229,13 @@ class BacktestMetrics:
             return self._empty_metrics()
 
         values = np.array([s.total_value for s in snapshots])
+        dates = [s.date for s in snapshots]
         daily_returns = np.diff(values) / values[:-1]
         n_days = len(daily_returns)
         annualization = 252
+
+        # 월별 수익률 — 일간 수익률을 월 단위로 복리 계산
+        monthly_returns = self._calculate_monthly_returns(dates, daily_returns)
 
         # 수익률
         total_return = (values[-1] - values[0]) / values[0] * 100
@@ -1220,6 +1266,7 @@ class BacktestMetrics:
         return {
             "total_return": round(total_return, 4),
             "cagr": round(cagr, 4),
+            "monthly_returns": monthly_returns,
             "volatility": round(volatility, 4),
             "max_drawdown": round(mdd, 4),
             "max_drawdown_duration": mdd_duration,
@@ -1255,6 +1302,36 @@ class BacktestMetrics:
                     max_duration = current_duration
 
         return -round(max_dd * 100, 4), max(max_duration, 0)
+
+    @staticmethod
+    def _calculate_monthly_returns(
+        dates: list[str], daily_returns: np.ndarray,
+    ) -> list[float]:
+        """일간 수익률을 월별로 그룹화하여 복리 수익률을 계산한다.
+
+        Args:
+            dates: 스냅샷 날짜 리스트 (YYYYMMDD). daily_returns보다 1개 더 많음.
+            daily_returns: 일간 수익률 배열.
+
+        Returns:
+            월별 복리 수익률 리스트 (%).
+        """
+        if len(daily_returns) == 0:
+            return []
+
+        # 월(YYYYMM) 기준으로 일간 수익률 그룹화 (dates[1:]과 daily_returns 대응)
+        monthly: dict[str, list[float]] = {}
+        for i, ret in enumerate(daily_returns):
+            month_key = dates[i + 1][:6]  # YYYYMM
+            monthly.setdefault(month_key, []).append(float(ret))
+
+        # 월별 복리 수익률
+        result = []
+        for month_key in sorted(monthly.keys()):
+            compound = float(np.prod([1 + r for r in monthly[month_key]]) - 1) * 100
+            result.append(round(compound, 4))
+
+        return result
 
     def _calculate_trade_metrics(self, trades: list[OrderResult],
                                   initial_capital: float) -> dict:
@@ -1381,6 +1458,7 @@ class BacktestMetrics:
         return {
             "total_return": 0.0,
             "cagr": 0.0,
+            "monthly_returns": [],
             "volatility": 0.0,
             "max_drawdown": 0.0,
             "max_drawdown_duration": 0,
@@ -1406,7 +1484,7 @@ class BacktestMetrics:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/trading/backtest/test_metrics.py -v`
-Expected: 17 passed
+Expected: 19 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1743,6 +1821,13 @@ class BacktestEngine:
 
     거래일을 순회하며 전략 파이프라인을 시뮬레이션한다.
     데이터 피드, 전략, 주문 생성기를 주입받아 동작한다.
+
+    **설계 의도 (Phase 3 Simplification):**
+    이 엔진은 order_generator callable을 주입받아 시그널 → 주문 변환을 외부에 위임한다.
+    이는 의도적인 단순화이다. Phase 3에서는 PortfolioManager, RiskManager 없이도
+    백테스트 루프 자체를 독립적으로 테스트할 수 있게 한다. Phase 4 (TradingEngine)에서
+    PortfolioManager.rebalance() → RiskManager.check_order() → order 생성 파이프라인을
+    order_generator로 주입하여 완전한 통합을 달성한다.
 
     Attributes:
         config: 백테스트 설정.
@@ -2410,6 +2495,25 @@ class TestBacktestStore:
         run = store.get_run(run_id)
         assert run["initial_capital"] == 100_000_000
         assert run["final_value"] == 103_000_000
+
+    def test_save_strategies_and_allocations(self, store, sample_result):
+        """전략 목록과 배분이 저장/조회된다."""
+        strategies = ["momentum", "value"]
+        allocations = {"momentum": 0.6, "value": 0.4}
+        run_id = store.save_run(
+            sample_result, name="전략 테스트",
+            strategies=strategies, allocations=allocations,
+        )
+        run = store.get_run(run_id)
+        assert json.loads(run["strategies"]) == ["momentum", "value"]
+        assert json.loads(run["allocations"]) == {"momentum": 0.6, "value": 0.4}
+
+    def test_default_strategies_and_allocations(self, store, sample_result):
+        """strategies/allocations 미지정 시 빈 기본값이 저장된다."""
+        run_id = store.save_run(sample_result)
+        run = store.get_run(run_id)
+        assert json.loads(run["strategies"]) == []
+        assert json.loads(run["allocations"]) == {}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -2463,6 +2567,8 @@ class BacktestStore:
                 CREATE TABLE IF NOT EXISTS runs (
                     run_id TEXT PRIMARY KEY,
                     name TEXT DEFAULT '',
+                    strategies TEXT DEFAULT '[]',
+                    allocations TEXT DEFAULT '{}',
                     start_date TEXT NOT NULL,
                     end_date TEXT NOT NULL,
                     initial_capital REAL NOT NULL,
@@ -2487,12 +2593,16 @@ class BacktestStore:
                 """
             )
 
-    def save_run(self, result: BacktestResult, name: str = "") -> str:
+    def save_run(self, result: BacktestResult, name: str = "",
+                 strategies: list[str] | None = None,
+                 allocations: dict[str, float] | None = None) -> str:
         """백테스트 결과를 저장한다.
 
         Args:
             result: 백테스트 결과.
             name: 사용자 지정 이름 (선택).
+            strategies: 전략 ID 목록 (선택).
+            allocations: 전략별 배분 비율 (선택).
 
         Returns:
             생성된 run_id.
@@ -2513,13 +2623,16 @@ class BacktestStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """
-                INSERT INTO runs (run_id, name, start_date, end_date,
+                INSERT INTO runs (run_id, name, strategies, allocations,
+                    start_date, end_date,
                     initial_capital, final_value, benchmark, params, metrics, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
                     name,
+                    json.dumps(strategies or [], ensure_ascii=False),
+                    json.dumps(allocations or {}, ensure_ascii=False),
                     config.start_date,
                     config.end_date,
                     config.initial_capital,
@@ -2615,7 +2728,7 @@ class BacktestStore:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/trading/backtest/test_store.py -v`
-Expected: 9 passed
+Expected: 11 passed
 
 - [ ] **Step 5: Update backtest __init__.py and commit**
 
@@ -2659,9 +2772,11 @@ git commit -m "feat(trading/backtest): add BacktestStore result persistence"
 
 `tests/trading/strategy/test_ai_synthesizer.py`:
 ```python
-"""StrategyAISynthesizer 테스트 — AI 전략 종합."""
+"""StrategyAISynthesizer 테스트 — AI 전략 종합.
 
-import asyncio
+asyncio.run()은 CLI entry에서만 사용 (CLAUDE.md 규칙). 테스트는 pytest-asyncio를 사용한다.
+"""
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -2828,102 +2943,109 @@ class TestPromptConstruction:
 
 
 class TestSynthesizeSuccess:
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_synthesize_returns_strategy_synthesis(self, mock_llm, synthesizer,
+    async def test_synthesize_returns_strategy_synthesis(self, mock_llm, synthesizer,
                                                     pulse_result, ranked_stocks,
                                                     strategy_signals, portfolio,
                                                     llm_response):
         """synthesize()가 StrategySynthesis를 반환한다."""
         mock_llm.return_value = llm_response
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert isinstance(result, StrategySynthesis)
         assert result.conviction_level == 0.72
 
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_synthesize_parses_market_view(self, mock_llm, synthesizer,
+    async def test_synthesize_parses_market_view(self, mock_llm, synthesizer,
                                             pulse_result, ranked_stocks,
                                             strategy_signals, portfolio,
                                             llm_response):
         """market_view가 올바르게 파싱된다."""
         mock_llm.return_value = llm_response
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert "유동성" in result.market_view
 
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_synthesize_parses_stock_opinions(self, mock_llm, synthesizer,
+    async def test_synthesize_parses_stock_opinions(self, mock_llm, synthesizer,
                                                pulse_result, ranked_stocks,
                                                strategy_signals, portfolio,
                                                llm_response):
         """종목별 의견이 StockOpinion으로 파싱된다."""
         mock_llm.return_value = llm_response
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert len(result.stock_opinions) == 1
         assert isinstance(result.stock_opinions[0], StockOpinion)
         assert result.stock_opinions[0].action == "매수"
 
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_synthesize_parses_allocation(self, mock_llm, synthesizer,
+    async def test_synthesize_parses_allocation(self, mock_llm, synthesizer,
                                            pulse_result, ranked_stocks,
                                            strategy_signals, portfolio,
                                            llm_response):
         """전략 배분 조정이 파싱된다."""
         mock_llm.return_value = llm_response
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert "momentum" in result.allocation_adjustment
         assert result.allocation_adjustment["momentum"] == 0.45
 
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_synthesize_parses_risk_warnings(self, mock_llm, synthesizer,
+    async def test_synthesize_parses_risk_warnings(self, mock_llm, synthesizer,
                                               pulse_result, ranked_stocks,
                                               strategy_signals, portfolio,
                                               llm_response):
         """리스크 경고가 파싱된다."""
         mock_llm.return_value = llm_response
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert len(result.risk_warnings) >= 1
         assert "미중" in result.risk_warnings[0]
 
 
 class TestFallback:
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_fallback_on_llm_failure(self, mock_llm, synthesizer,
+    async def test_fallback_on_llm_failure(self, mock_llm, synthesizer,
                                       pulse_result, ranked_stocks,
                                       strategy_signals, portfolio):
         """LLM 실패 시 _fallback()이 호출된다."""
         mock_llm.side_effect = Exception("API Error")
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert isinstance(result, StrategySynthesis)
         assert result.conviction_level == 0.5
         assert "실패" in result.risk_warnings[0] or "실패" in result.reasoning
 
+    @pytest.mark.asyncio
     @patch("alphapulse.trading.strategy.ai_synthesizer.StrategyAISynthesizer._call_llm")
-    def test_fallback_on_invalid_json(self, mock_llm, synthesizer,
+    async def test_fallback_on_invalid_json(self, mock_llm, synthesizer,
                                        pulse_result, ranked_stocks,
                                        strategy_signals, portfolio):
         """잘못된 JSON 응답 시 _fallback()이 호출된다."""
         mock_llm.return_value = "이것은 유효하지 않은 JSON입니다"
-        result = asyncio.run(synthesizer.synthesize(
+        result = await synthesizer.synthesize(
             pulse_result, ranked_stocks, strategy_signals,
             [], None, portfolio,
-        ))
+        )
         assert isinstance(result, StrategySynthesis)
         assert result.conviction_level == 0.5
 
@@ -3272,7 +3394,7 @@ git commit -m "feat(trading/strategy): fully implement StrategyAISynthesizer wit
 
 After completing all tasks, verify:
 
-- [ ] `pytest tests/trading/backtest/ -v` — 모든 백테스트 테스트 통과 (~71개)
+- [ ] `pytest tests/trading/backtest/ -v` — 모든 백테스트 테스트 통과 (~76개)
 - [ ] `pytest tests/trading/strategy/test_ai_synthesizer.py -v` — AI 종합 테스트 통과 (~17개)
 - [ ] `pytest tests/trading/ -v` — 모든 trading 테스트 통과 (Phase 1 + 2 + 3)
 - [ ] `pytest tests/ -v` — 기존 275개 + trading 테스트 전체 회귀 없음
@@ -3282,8 +3404,12 @@ After completing all tasks, verify:
 - [ ] `asyncio.run()` 사용 없음 (CLI entry 제외) — hook이 자동 검사
 - [ ] SimBroker가 Broker Protocol의 5개 메서드를 모두 구현
 - [ ] HistoricalDataFeed가 look-ahead bias를 AssertionError로 차단
-- [ ] BacktestMetrics가 모든 21개 지표를 계산 (수익률 3, 리스크 3, 리스크조정 3, 거래 6, 벤치마크 6)
+- [ ] BacktestMetrics가 모든 22개 지표를 계산 (수익률 3 + monthly_returns, 리스크 3, 리스크조정 3, 거래 6, 벤치마크 6)
 - [ ] AI Synthesizer가 _call_llm 실패 시 _fallback() 반환
+- [ ] AI Synthesizer 테스트에서 `asyncio.run()` 미사용 (pytest-asyncio 패턴)
+- [ ] HistoricalDataFeed가 DataProvider Protocol 스텁 메서드 구현 (get_financials, get_investor_flow, get_short_interest)
+- [ ] BacktestStore의 runs 테이블에 strategies, allocations 컬럼 존재
+- [ ] SimBroker가 `isinstance(broker, Broker)` 프로토콜 적합성 테스트 통과
 
 ---
 
