@@ -424,6 +424,106 @@ def screen(market, top, factor):
         )
 
 
+# ── Trading Data 서브커맨드 ─────────────────────────────────────
+
+
+@trading.group()
+def data():
+    """데이터 수집 관리"""
+    pass
+
+
+@data.command("collect")
+@click.option("--market", default="ALL", help="시장 (KOSPI/KOSDAQ/ALL)")
+@click.option("--years", default=3, type=int, help="수집 기간 (년)")
+@click.option("--delay", default=0.5, type=float, help="요청 간 딜레이 (초)")
+@click.option("--no-resume", is_flag=True, help="체크포인트 무시")
+def data_collect(market, years, delay, no_resume):
+    """전종목 데이터 수집 (OHLCV + 재무 + 수급)"""
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.bulk_collector import BulkCollector
+
+    cfg = Config()
+    collector = BulkCollector(
+        db_path=cfg.DATA_DIR / "trading.db", delay=delay, years=years
+    )
+    markets = ["KOSPI", "KOSDAQ"] if market == "ALL" else [market]
+
+    click.echo(f"데이터 수집 시작: {', '.join(markets)} ({years}년치)")
+    click.echo(f"딜레이: {delay}초, 재개: {'아니오' if no_resume else '예'}")
+    click.echo()
+
+    results = collector.collect_all(
+        markets=markets, years=years, resume=not no_resume
+    )
+
+    click.echo(f"\n{'=' * 50}")
+    click.echo(" 수집 완료")
+    click.echo(f"{'=' * 50}")
+    for r in results:
+        click.echo(
+            f" {r.market}: OHLCV {r.ohlcv_count}종목, "
+            f"재무 {r.fundamentals_count}, 수급 {r.flow_count} "
+            f"({r.elapsed_seconds:.0f}초)"
+        )
+        if r.skipped:
+            click.echo(f"   (건너뜀: {r.skipped}종목)")
+
+
+@data.command("update")
+@click.option("--market", default="ALL", help="시장 (KOSPI/KOSDAQ/ALL)")
+def data_update(market):
+    """마지막 수집 이후 신규 데이터 업데이트"""
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.bulk_collector import BulkCollector
+
+    cfg = Config()
+    collector = BulkCollector(db_path=cfg.DATA_DIR / "trading.db")
+    markets = ["KOSPI", "KOSDAQ"] if market == "ALL" else [market]
+
+    results = collector.update(markets=markets)
+
+    if not results:
+        click.echo("이미 최신 상태입니다.")
+    else:
+        for r in results:
+            click.echo(
+                f"{r.market}: {r.ohlcv_count}종목 업데이트 "
+                f"({r.elapsed_seconds:.0f}초)"
+            )
+
+
+@data.command("status")
+def data_status():
+    """데이터 수집 현황"""
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.bulk_collector import BulkCollector
+
+    cfg = Config()
+    collector = BulkCollector(db_path=cfg.DATA_DIR / "trading.db")
+    s = collector.status()
+
+    click.echo(
+        f"\n종목 수: {s['total_stocks']} "
+        f"(KOSPI: {s['kospi']}, KOSDAQ: {s['kosdaq']}, ETF: {s['etf']})"
+    )
+    click.echo()
+
+    if not s["collection"]:
+        click.echo(
+            "수집 이력이 없습니다. "
+            "'ap trading data collect'로 초기 수집을 시작하세요."
+        )
+        return
+
+    click.echo(f"{'시장':<10} {'데이터':<15} {'최종 수집일':<12}")
+    click.echo(f"{'-' * 40}")
+    for row in s["collection"]:
+        click.echo(
+            f"{row['market']:<10} {row['data_type']:<15} {row['last_date']}"
+        )
+
+
 # NOTE: `ap trading backtest` 명령은 Phase 3에서 정의됨.
 #       `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
 
