@@ -10,16 +10,29 @@ AI 기반 투자 인텔리전스 플랫폼. 정량(Market Pulse) + 정성(Conten
 - `alphapulse/agents/` — MarketCommentaryAgent, SeniorSynthesisAgent.
 - `alphapulse/feedback/` — 피드백 시스템. 시장 결과 수집, 적중률, 사후 분석 멀티에이전트.
 - `alphapulse/core/` — 공유 인프라 (config, notifier, storage, constants).
+- `alphapulse/trading/` — **자동 매매 시스템**. 9개 서브모듈:
+  - `core/` — 데이터 모델, Protocol 인터페이스, 캘린더, 비용 모델, 감사 추적.
+  - `data/` — 종목 데이터 수집 (OHLCV, 재무, 수급, 공매도). **Sync**.
+  - `screening/` — 20개 팩터, 필터, 멀티팩터 랭킹. **Sync**.
+  - `strategy/` — 4개 전략 + AI 종합 판단. **Sync** (AI만 Async).
+  - `portfolio/` — 포트폴리오 최적화, 리밸런싱. **Sync**.
+  - `risk/` — VaR, 드로다운, 스트레스 테스트. **Sync**.
+  - `backtest/` — 백테스트 엔진, SimBroker. **Sync**.
+  - `broker/` — 한투 API (KISBroker/PaperBroker). **Sync** (requests).
+  - `orchestrator/` — 5-phase 파이프라인, 스케줄러. **Async** (CLI entry만 asyncio.run).
 
 ## Key Rules
 
 - Market = **SYNC** (requests, pykrx). Content/Feedback agents = **ASYNC** (httpx, google-adk).
+- Trading = **SYNC** (data, screening, strategy, portfolio, risk, backtest, broker). **Async**: AI synthesizer + orchestrator.
 - `asyncio.run()`은 CLI entry에서만. 내부에서는 `await`. 중첩 호출 **금지**.
 - LLM 호출: `asyncio.to_thread()`로 sync genai API를 non-blocking 래핑.
 - Config: `Config()` 인스턴스 사용. 모듈 레벨 상수 대신.
 - AI: Google Gemini API (`google-adk ~= 1.27.2`).
 - 피드백 코드는 항상 try/except. 피드백 실패가 메인 브리핑을 중단하면 안 됨.
 - `INDICATOR_NAMES`는 `core/constants.py`에 공유 정의 (DRY).
+- Trading Protocol 기반: `Broker`, `StrategyProtocol`, `RiskChecker`, `DataProvider` 인터페이스.
+- 리스크 리밋은 AI/전략/사용자 모두 오버라이드 불가.
 
 ## File Conventions
 
@@ -30,8 +43,9 @@ AI 기반 투자 인텔리전스 플랫폼. 정량(Market Pulse) + 정성(Conten
 ## Testing
 
 ```bash
-pytest tests/ -v                     # 전체 (275개)
-pytest tests/{market,content,briefing,agents,feedback}/ -v  # 모듈별
+pytest tests/ -v                     # 전체 (739개)
+pytest tests/{market,content,briefing,agents,feedback}/ -v  # 기존 모듈별
+pytest tests/trading/ -v             # 자동 매매 시스템 (464개)
 pytest tests/ --cov=alphapulse       # 커버리지
 ```
 
@@ -54,6 +68,8 @@ pytest tests/ --cov=alphapulse       # 커버리지
 
 - CLI 명령어: `.claude/docs/cli-commands.md`
 - AI Agent/Storage/Feedback 컨벤션: `.claude/docs/conventions.md`
+- Trading System 가이드: `docs/trading-system-guide.md`
+- Trading System 설계: `docs/superpowers/specs/2026-04-09-trading-system-design.md`
 
 ## Custom Commands
 

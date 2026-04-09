@@ -1,6 +1,6 @@
 # AlphaPulse
 
-**AI 기반 투자 인텔리전스 플랫폼** — 정량 분석(Market Pulse)과 정성 분석(Content Intelligence)을 통합하여 일일 투자 브리핑을 자동 생성하고, 피드백 시스템으로 매일 스스로 학습합니다.
+**AI 기반 투자 인텔리전스 + 자동 매매 플랫폼** — 정량 분석(Market Pulse) + 정성 분석(Content Intelligence) + AI 종합 판단 + 피드백 학습 + 자동 투자 시스템(Trading System)을 통합한 엔드투엔드 투자 플랫폼입니다.
 
 ## 리포트 3종 체계
 
@@ -79,6 +79,37 @@ ap feedback history --days 7         # 시그널 vs 실제 결과 테이블
 ap feedback analyze --date 2026-04-03  # 특정 날짜 사후 분석
 ```
 
+### 자동 매매 시스템 (Trading System)
+
+```bash
+# 종목 스크리닝
+ap trading screen --market KOSPI --factor momentum --top 20
+
+# 백테스트
+ap trading backtest --strategy momentum --start 20200101 --end 20241231
+
+# 모의투자
+ap trading run --mode paper
+ap trading run --mode paper --daemon   # 데몬 모드
+
+# 실매매 (이중 안전장치)
+ap trading run --mode live
+
+# 포트폴리오
+ap trading portfolio show              # 현재 상태
+ap trading portfolio history --days 30 # 성과 이력
+
+# 리스크
+ap trading risk report                 # 리스크 리포트
+ap trading risk stress                 # 스트레스 테스트
+
+# 시스템
+ap trading status                      # 시스템 상태
+ap trading reconcile                   # DB-증권사 대사
+```
+
+> 상세 가이드: [docs/trading-system-guide.md](docs/trading-system-guide.md)
+
 ### 캐시 관리
 
 ```bash
@@ -110,6 +141,19 @@ ap cache clear                       # 시장 데이터 캐시 초기화
 | `FEEDBACK_NEWS_ENABLED` | `true` | 장 후 뉴스 수집 on/off |
 | `FEEDBACK_NEWS_COUNT` | `10` | 수집할 뉴스 기사 수 |
 
+### Trading System
+
+| 변수 | 기본값 | 용도 |
+|------|--------|------|
+| `KIS_APP_KEY` | — | 한국투자증권 앱 키 |
+| `KIS_APP_SECRET` | — | 한국투자증권 앱 시크릿 |
+| `KIS_ACCOUNT_NO` | — | 계좌번호 |
+| `KIS_IS_PAPER` | `true` | `true`: 모의투자, `false`: 실전 |
+| `LIVE_TRADING_ENABLED` | `false` | 실매매 최종 스위치 (이중 안전장치) |
+| `MAX_DAILY_ORDERS` | `50` | 일일 주문 한도 |
+| `MAX_DAILY_AMOUNT` | `50000000` | 일일 금액 한도 (원) |
+| `STRATEGY_ALLOCATIONS` | `{"topdown_etf":0.3,...}` | 전략별 자금 배분 (JSON) |
+
 ## 아키텍처
 
 ```
@@ -127,22 +171,19 @@ alphapulse/
 │   ├── crawler.py  #   Crawl4AI 크롤링
 │   └── monitor.py  #   BlogMonitor 오케스트레이터
 ├── briefing/       # 일일 브리핑 통합
-│   ├── orchestrator.py  # 피드백 수집 → 정량+정성+AI → 포맷 → 전송
-│   ├── formatter.py     # 텔레그램 HTML 포맷 (매일 결과 + 주간 요약)
-│   └── scheduler.py     # 데몬 모드 스케줄러
 ├── agents/         # 브리핑 AI 에이전트
-│   ├── commentary.py    # MarketCommentaryAgent (정량 해설, 피드백 인지)
-│   └── synthesis.py     # SeniorSynthesisAgent (종합 판단, 피드백 인지)
-└── feedback/       # 피드백 시스템 (장 후 검증 + 학습)
-    ├── collector.py      # 시장 결과 수집 + 수익률 계산 + 적중 판정
-    ├── evaluator.py      # 적중률, 상관계수, 지표별 정확도
-    ├── summarizer.py     # AI 프롬프트 주입용 요약 + 텔레그램 메시지
-    ├── news_collector.py # 네이버 금융 뉴스 크롤링 (장 후 시황)
-    └── agents/           # 사후 분석 멀티에이전트
-        ├── blind_spot.py         # 시스템 사각지대 식별
-        ├── prediction_review.py  # 예측 복기 (지표별 적중/미적중 원인)
-        ├── external_factor.py    # 외부 변수 식별 (정책/지정학/이벤트)
-        └── senior_feedback.py    # 종합 피드백 + 시스템 개선 제안
+├── feedback/       # 피드백 시스템 (장 후 검증 + 학습)
+│   └── agents/     #   사후 분석 멀티에이전트 (4종)
+└── trading/        # 자동 매매 시스템 (NEW)
+    ├── core/       #   데이터 모델, Protocol 인터페이스, 캘린더, 비용 모델
+    ├── data/       #   종목 데이터 수집 (OHLCV, 재무, 수급, 공매도)
+    ├── screening/  #   20개 팩터 계산, 필터, 멀티팩터 랭킹
+    ├── strategy/   #   4개 전략 (TopDownETF, Momentum, Value, QualityMomentum) + AI 종합
+    ├── portfolio/  #   포트폴리오 최적화 (mean-variance, risk parity), 리밸런싱
+    ├── risk/       #   리스크 엔진 (VaR, 드로다운 자동 대응, 스트레스 테스트)
+    ├── backtest/   #   백테스트 엔진 (22개 성과 지표, look-ahead bias 방지)
+    ├── broker/     #   한국투자증권 API (실매매 + 모의투자)
+    └── orchestrator/ # 5-phase 일일 파이프라인, 스케줄러, 알림
 ```
 
 ### 11개 지표 (Market Pulse Score)
@@ -201,12 +242,13 @@ D+5 → 5일 수익률 평가
 ## 테스트
 
 ```bash
-pytest tests/ -v                     # 전체 (275개)
+pytest tests/ -v                     # 전체 (739개)
 pytest tests/market/ -v              # 정량 분석
 pytest tests/content/ -v             # 정성 분석
 pytest tests/briefing/ -v            # 브리핑
 pytest tests/agents/ -v              # 브리핑 AI 에이전트
 pytest tests/feedback/ -v            # 피드백 시스템
+pytest tests/trading/ -v             # 자동 매매 시스템 (464개)
 pytest tests/ --cov=alphapulse       # 커버리지 리포트
 ```
 
@@ -222,14 +264,16 @@ pytest tests/ --cov=alphapulse       # 커버리지 리포트
 | CLI | click |
 | 터미널 UI | rich |
 | 리포트 | jinja2, matplotlib |
-| 저장소 | SQLite (캐시 + 이력 + 피드백) |
+| 저장소 | SQLite (캐시 + 이력 + 피드백 + 매매) |
+| 포트폴리오 최적화 | scipy, numpy |
+| 증권사 API | 한국투자증권 Open API (requests) |
 
 ## 로드맵
 
 | 버전 | 목표 |
 |------|------|
 | **v1.0** | 일일 자동 브리핑 (정량+정성+AI 종합) |
-| **v1.1** (현재) | 피드백 시스템 (적중률 추적 + 사후 분석 + AI 프롬프트 자동 반영) |
-| v1.5 | AI 에이전트가 tool/function calling으로 시장 데이터 능동 조회 |
-| v2.0 | AI 투자 에이전트, 병렬 수집, 백테스팅 |
+| **v1.1** | 피드백 시스템 (적중률 추적 + 사후 분석 + AI 프롬프트 자동 반영) |
+| **v2.0** (현재) | 자동 매매 시스템 (백테스트 + 모의투자 + 실매매 + AI 종합 판단) |
+| v2.5 | 실매매 최적화, 실시간 시세, 웹소켓 모니터링 |
 | v3.0 | 웹 대시보드 (Streamlit/Gradio), 실시간 갱신 |
