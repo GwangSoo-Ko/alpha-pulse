@@ -5,9 +5,9 @@ import io
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 from jinja2 import Environment, FileSystemLoader
 
 from alphapulse.core.config import Config

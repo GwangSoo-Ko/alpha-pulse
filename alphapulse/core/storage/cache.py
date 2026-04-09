@@ -4,7 +4,6 @@
 반복 API 호출을 최소화한다.
 """
 
-import json
 import sqlite3
 import time
 from io import StringIO

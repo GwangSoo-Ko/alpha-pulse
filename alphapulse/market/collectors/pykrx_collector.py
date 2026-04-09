@@ -115,8 +115,8 @@ class PykrxCollector(BaseCollector):
             return cached
 
         # 네이버 API - 시총 상위 종목
-        data = self._naver_get(f"index/{MARKET_INDEX.get(market, market)}/price",
-                               {"page": 1, "pageSize": n})
+        self._naver_get(f"index/{MARKET_INDEX.get(market, market)}/price",
+                        {"page": 1, "pageSize": n})
         # pykrx 폴백
         try:
             df = stock.get_market_cap_by_ticker(date, market)

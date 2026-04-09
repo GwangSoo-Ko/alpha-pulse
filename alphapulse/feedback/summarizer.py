@@ -1,6 +1,7 @@
 """피드백 요약 — AI 프롬프트용 컨텍스트 + 텔레그램 메시지 포맷."""
 
 import logging
+
 from alphapulse.core.storage.feedback import FeedbackStore
 from alphapulse.feedback.evaluator import FeedbackEvaluator
 

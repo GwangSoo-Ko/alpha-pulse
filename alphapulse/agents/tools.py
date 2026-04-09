@@ -26,8 +26,8 @@ def get_recent_content_analysis(hours: int = 24) -> list[str]:
 
 def get_pulse_history(days: int = 7) -> list[dict]:
     """최근 N일간 Market Pulse Score 이력."""
-    from alphapulse.core.storage import PulseHistory
     from alphapulse.core.config import Config
+    from alphapulse.core.storage import PulseHistory
     cfg = Config()
     history = PulseHistory(cfg.HISTORY_DB)
     return history.get_recent(days=days)

@@ -3,8 +3,8 @@ import logging
 
 from google import genai
 
-from alphapulse.core.config import Config
 from alphapulse.content.agents.topic_classifier import TOPIC_LABELS
+from alphapulse.core.config import Config
 
 logger = logging.getLogger(__name__)
 

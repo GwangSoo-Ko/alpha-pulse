@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from alphapulse.core.config import Config
 

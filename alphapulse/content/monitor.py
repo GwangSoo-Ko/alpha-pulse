@@ -1,12 +1,12 @@
 import asyncio
 import logging
 
-from alphapulse.core.config import Config
-from alphapulse.content.detector import PostDetector
+from alphapulse.content.agents import AnalysisOrchestrator
 from alphapulse.content.category_filter import CategoryFilter
 from alphapulse.content.crawler import BlogCrawler
-from alphapulse.content.agents import AnalysisOrchestrator
+from alphapulse.content.detector import PostDetector
 from alphapulse.content.reporter import ReportWriter
+from alphapulse.core.config import Config
 from alphapulse.core.notifier import TelegramNotifier
 
 logger = logging.getLogger("alphapulse.content")

@@ -4,8 +4,8 @@ import asyncio
 import logging
 
 from alphapulse.feedback.agents.blind_spot import BlindSpotAgent
-from alphapulse.feedback.agents.prediction_review import PredictionReviewAgent
 from alphapulse.feedback.agents.external_factor import ExternalFactorAgent
+from alphapulse.feedback.agents.prediction_review import PredictionReviewAgent
 from alphapulse.feedback.agents.senior_feedback import SeniorFeedbackAgent
 
 logger = logging.getLogger(__name__)

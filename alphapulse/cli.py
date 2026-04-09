@@ -3,11 +3,12 @@
 import logging
 import warnings
 
+import click
+
+from alphapulse import __version__
+
 # requests/urllib3 버전 불일치 경고 억제
 warnings.filterwarnings("ignore", message="urllib3.*chardet.*charset_normalizer")
-
-import click
-from alphapulse import __version__
 
 
 @click.group()
@@ -140,9 +141,9 @@ def report(date, output):
 @click.option("--days", default=30, help="조회 기간 (일)")
 def history(days):
     """과거 시황 판단 이력"""
-    from alphapulse.market.reporters.terminal import print_history
-    from alphapulse.core.storage import PulseHistory
     from alphapulse.core.config import Config
+    from alphapulse.core.storage import PulseHistory
+    from alphapulse.market.reporters.terminal import print_history
 
     cfg = Config()
     h = PulseHistory(str(cfg.HISTORY_DB))
@@ -169,6 +170,7 @@ def content():
 def content_monitor(daemon, interval, force_latest, no_telegram, blog_only, channel_only):
     """블로그/채널 콘텐츠 모니터링."""
     import asyncio
+
     from alphapulse.content.monitor import BlogMonitor
     from alphapulse.core.config import Config
     cfg = Config()
@@ -189,6 +191,7 @@ def content_monitor(daemon, interval, force_latest, no_telegram, blog_only, chan
 def content_test_telegram():
     """텔레그램 연결 테스트."""
     import asyncio
+
     from alphapulse.core.notifier import TelegramNotifier
     notifier = TelegramNotifier()
     asyncio.run(notifier.send_test())
@@ -230,9 +233,10 @@ def briefing(no_telegram, daemon, briefing_time, date):
 def commentary(date):
     """AI 시장 해설 생성."""
     import asyncio
-    from alphapulse.market.engine.signal_engine import SignalEngine
+
     from alphapulse.agents.commentary import MarketCommentaryAgent
     from alphapulse.briefing.orchestrator import BriefingOrchestrator
+    from alphapulse.market.engine.signal_engine import SignalEngine
 
     engine = SignalEngine()
     pulse_result = engine.run(date)
@@ -324,8 +328,8 @@ def feedback_indicators(days):
 @click.option("--days", default=7, help="표시 기간 (일)")
 def feedback_history(days):
     """최근 시그널 vs 실제 결과 테이블."""
-    from alphapulse.core.storage.feedback import FeedbackStore
     from alphapulse.core.config import Config
+    from alphapulse.core.storage.feedback import FeedbackStore
     cfg = Config()
     store = FeedbackStore(cfg.DATA_DIR / "feedback.db")
     records = store.get_recent(days=days)

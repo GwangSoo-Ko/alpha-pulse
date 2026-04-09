@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from alphapulse.core.config import Config
-from alphapulse.market.engine.signal_engine import SignalEngine
 from alphapulse.core.storage import DataCache, PulseHistory
+from alphapulse.market.engine.signal_engine import SignalEngine
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +73,9 @@ class BriefingOrchestrator:
         yesterday = None
         if self.config.FEEDBACK_ENABLED:
             try:
+                from alphapulse.core.storage.feedback import FeedbackStore
                 from alphapulse.feedback.collector import FeedbackCollector
                 from alphapulse.feedback.summarizer import FeedbackSummarizer
-                from alphapulse.core.storage.feedback import FeedbackStore
 
                 feedback_store = FeedbackStore(self.config.DATA_DIR / "feedback.db")
                 collector = FeedbackCollector(db_path=self.config.DATA_DIR / "feedback.db")
@@ -112,7 +112,6 @@ class BriefingOrchestrator:
                     content_summaries=self.collect_recent_content(hours=48),
                 )
                 # 분석 결과를 DB에 저장
-                import json
                 feedback_store.update_analysis(
                     date=yesterday["date"],
                     post_analysis=post_analysis.get("senior_synthesis", ""),

@@ -1,12 +1,10 @@
-import asyncio
 import logging
 from datetime import datetime
-from pathlib import Path
 
 from telethon import TelegramClient, events
 
-from alphapulse.core.config import Config
 from alphapulse.content.aggregator import MessageAggregator
+from alphapulse.core.config import Config
 
 logger = logging.getLogger(__name__)
 

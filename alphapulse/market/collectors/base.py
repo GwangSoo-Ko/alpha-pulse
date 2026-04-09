@@ -5,7 +5,7 @@
 
 import logging
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 from functools import wraps
 from typing import Any
 

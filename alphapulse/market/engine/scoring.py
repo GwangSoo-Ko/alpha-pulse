@@ -1,6 +1,7 @@
 """점수 계산 유틸리티"""
 
 import numpy as np
+
 from alphapulse.core.config import Config
 
 _config = Config()

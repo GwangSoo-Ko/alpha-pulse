@@ -1,11 +1,9 @@
 """rich 기반 터미널 리포터"""
 
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
-from rich.columns import Columns
-from rich.layout import Layout
 
 from alphapulse.core.config import Config
 
@@ -69,7 +67,7 @@ def print_pulse_report(result: dict):
 
     # 헤더 패널
     score_text = Text()
-    score_text.append(f"\n  Market Pulse Score: ", style="bold")
+    score_text.append("\n  Market Pulse Score: ", style="bold")
     score_text.append(f"{score:+.1f}", style=style)
     score_text.append(f"\n  {signal}\n", style=style)
 

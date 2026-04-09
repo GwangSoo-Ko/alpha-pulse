@@ -1,10 +1,10 @@
 import asyncio
 import logging
 
-from alphapulse.core.config import Config
-from alphapulse.content.agents.topic_classifier import TopicClassifier
-from alphapulse.content.agents.specialists import get_specialists_for_topics
 from alphapulse.content.agents.senior_analyst import SeniorAnalyst
+from alphapulse.content.agents.specialists import get_specialists_for_topics
+from alphapulse.content.agents.topic_classifier import TopicClassifier
+from alphapulse.core.config import Config
 
 logger = logging.getLogger(__name__)
 

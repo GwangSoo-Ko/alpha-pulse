@@ -1,6 +1,7 @@
 """브리핑 메시지 포맷팅 (Telegram HTML)."""
 
 from datetime import datetime
+
 from alphapulse.core.constants import INDICATOR_NAMES
 
 
@@ -61,7 +62,6 @@ class BriefingFormatter:
         weekly_summary: str = "",
     ) -> str:
         """종합 리포트 HTML 포맷팅."""
-        score = pulse_result.get("score", 0)
         signal = pulse_result.get("signal", "")
         date_str = self._format_date(pulse_result.get("date", ""))
         lines = [
