@@ -1,5 +1,22 @@
 # Detailed Conventions
 
+## Hooks (Dev Harness)
+
+| 훅 | 이벤트 | 매처 | 역할 |
+|---|--------|------|------|
+| `block-dangerous-commands.sh` | PreToolUse | Bash | force push, reset --hard, rm -rf, git clean -f 차단 |
+| `ruff-check.sh` | PostToolUse | Write\|Edit | Python 파일 ruff 린트 자동 검사 |
+| `check-asyncio-run.sh` | PostToolUse | Write\|Edit | asyncio.run() CLI entry 외 사용 차단 |
+| `post-compact-reminder.sh` | SessionStart | compact | 컨텍스트 압축 후 핵심 규칙 재주입 |
+| Stop prompt | Stop | (all) | 작업 완료 시: 테스트·문서·커밋 확인. 푸시는 사용자 확인 필요 |
+
+### 작업 완료 프로토콜 (Stop 훅 강제)
+
+1. 테스트 실행 (`pytest`)
+2. 문서 최신화 (CLAUDE.md, .claude/docs/ 등)
+3. 변경사항 커밋
+4. 푸시는 **사용자가 `/push`로 명시적 요청** 시에만 실행
+
 ## AI Agent Conventions
 
 - 모든 에이전트: `__init__(self)` → `Config()` 인스턴스 생성.

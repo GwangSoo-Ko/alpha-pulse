@@ -38,8 +38,11 @@ pytest tests/ --cov=alphapulse       # 커버리지
 ## Quality Gates (자동 강제)
 
 - **Ruff 린터**: Write/Edit 후 PostToolUse hook이 자동 실행. 린트 에러 시 수정 필요.
-- **`/push` CI 게이트**: ruff check + pytest 통과해야만 커밋/푸시 진행.
-- 설정: `pyproject.toml [tool.ruff]`, `.claude/hooks/ruff-check.sh`
+- **asyncio.run() 검사**: Write/Edit 후 CLI entry 외 asyncio.run() 사용 차단.
+- **위험 명령 차단**: PreToolUse hook이 force push, reset --hard, rm -rf 등 차단.
+- **컨텍스트 압축 복구**: SessionStart hook이 compact 후 핵심 규칙 재주입.
+- **작업 완료 검증 (Stop hook)**: 코드 변경 시 → 1) 테스트 실행 2) 문서 최신화 3) 커밋 확인. **푸시는 사용자가 `/push`로 명시적 요청 시에만.**
+- 설정: `pyproject.toml [tool.ruff]`, `.claude/hooks/`, `.claude/settings.json`
 
 ## Known Failures (실수 기록 — 에이전트가 반복한 실수)
 

@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Check if this session involved code changes (Write/Edit to .py files). If code was changed, verify: 1) Were tests mentioned or run? 2) Were there any unresolved lint errors? If code was changed but tests were NOT run and NOT explicitly skipped by the user, respond with {\"ok\": false, \"reason\": \"Code was modified but tests were not run. Run pytest before completing.\"}. If no code was changed, or tests were run, respond with {\"ok\": true}.",
+            "prompt": "Check if this session involved code changes (Write/Edit to .py files). If code was changed, verify ALL of the following:\n1) Were tests run? (pytest)\n2) Were there any unresolved lint errors?\n3) Were relevant docs updated? (CLAUDE.md, .claude/docs/, README.md if applicable)\n4) Were changes committed? (git commit)\n5) Push must NOT be auto-executed — push requires explicit user confirmation via /push command.\n\nIf code was changed but any of items 1-4 are incomplete and NOT explicitly skipped by the user, respond with {\"ok\": false, \"reason\": \"<describe what is missing: tests not run / docs not updated / changes not committed>\"} listing all missing items.\nIf no code was changed, or all items are satisfied, respond with {\"ok\": true}.",
             "timeout": 15
           }
         ]
