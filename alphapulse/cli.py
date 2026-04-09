@@ -356,3 +356,69 @@ def feedback_history(days):
 def feedback_analyze(date):
     """특정 날짜 사후 분석 실행."""
     click.echo("사후 분석은 Phase B에서 구현 예정")
+
+
+# ── Trading 명령어 ──────────────────────────────────────────────
+@cli.group()
+def trading():
+    """자동 매매 시스템"""
+    pass
+
+
+@trading.command()
+@click.option("--market", default="KOSPI", help="시장 (KOSPI/KOSDAQ)")
+@click.option("--top", default=20, help="상위 N종목")
+@click.option("--factor", default="momentum", help="주요 팩터")
+def screen(market, top, factor):
+    """종목 스크리닝 — 팩터 기반 종목 랭킹"""
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.store import TradingStore
+    from alphapulse.trading.data.universe import Universe
+    from alphapulse.trading.screening.factors import FactorCalculator
+    from alphapulse.trading.screening.ranker import MultiFactorRanker
+
+    cfg = Config()
+    db_path = cfg.DATA_DIR / "trading.db"
+    store = TradingStore(db_path)
+    universe = Universe(store)
+
+    stocks = universe.get_by_market(market)
+    if not stocks:
+        click.echo(f"{market} 종목 데이터가 없습니다. 먼저 데이터를 수집하세요.")
+        return
+
+    calc = FactorCalculator(store)
+    factor_data = {}
+    for s in stocks:
+        factor_data[s.code] = {
+            "momentum": calc.momentum(s.code),
+            "value": calc.value(s.code),
+            "quality": calc.quality(s.code),
+            "flow": calc.flow(s.code),
+            "volatility": calc.volatility(s.code),
+        }
+
+    # 팩터별 가중치 프리셋
+    weight_presets = {
+        "momentum": {"momentum": 0.6, "flow": 0.3, "volatility": 0.1},
+        "value": {"value": 0.4, "quality": 0.3, "momentum": 0.2, "flow": 0.1},
+        "quality": {"quality": 0.4, "momentum": 0.3, "value": 0.2, "flow": 0.1},
+        "balanced": {"momentum": 0.25, "value": 0.25, "quality": 0.2, "flow": 0.15, "volatility": 0.15},
+    }
+    weights = weight_presets.get(factor, weight_presets["balanced"])
+
+    ranker = MultiFactorRanker(weights=weights)
+    signals = ranker.rank(stocks, factor_data, strategy_id=factor)
+
+    click.echo(f"\n{'='*60}")
+    click.echo(f" {market} 종목 스크리닝 (팩터: {factor}, 상위 {top})")
+    click.echo(f"{'='*60}")
+    click.echo(f" {'순위':>4}  {'종목코드':>8}  {'종목명':<12}  {'점수':>6}  {'주요팩터'}")
+    click.echo(f" {'-'*56}")
+
+    for i, sig in enumerate(signals[:top], 1):
+        top_factor = max(sig.factors, key=sig.factors.get) if sig.factors else "-"
+        click.echo(
+            f" {i:>4}  {sig.stock.code:>8}  {sig.stock.name:<12}  "
+            f"{sig.score:>+6.1f}  {top_factor}"
+        )
