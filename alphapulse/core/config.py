@@ -1,5 +1,6 @@
 """통합 설정 관리 - KMP + BlogPulse 설정 병합"""
 
+import json
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -122,6 +123,30 @@ class Config:
         self.FEEDBACK_LOOKBACK_DAYS = int(os.environ.get("FEEDBACK_LOOKBACK_DAYS", "30"))
         self.FEEDBACK_NEWS_ENABLED = os.environ.get("FEEDBACK_NEWS_ENABLED", "true").lower() == "true"
         self.FEEDBACK_NEWS_COUNT = int(os.environ.get("FEEDBACK_NEWS_COUNT", "10"))
+
+        # ── Trading: KIS API ─────────────────────────────────────
+        self.KIS_APP_KEY = os.environ.get("KIS_APP_KEY", "")
+        self.KIS_APP_SECRET = os.environ.get("KIS_APP_SECRET", "")
+        self.KIS_ACCOUNT_NO = os.environ.get("KIS_ACCOUNT_NO", "")
+        self.KIS_IS_PAPER = os.environ.get("KIS_IS_PAPER", "true").lower() == "true"
+
+        # ── Trading: 안전장치 ─────────────────────────────────────
+        self.LIVE_TRADING_ENABLED = (
+            os.environ.get("LIVE_TRADING_ENABLED", "false").lower() == "true"
+        )
+        self.MAX_DAILY_ORDERS = int(os.environ.get("MAX_DAILY_ORDERS", "50"))
+        self.MAX_DAILY_AMOUNT = int(os.environ.get("MAX_DAILY_AMOUNT", "50000000"))
+
+        # ── Trading: 전략 설정 ─────────────────────────────────────
+        default_alloc = '{"topdown_etf":0.3,"momentum":0.4,"value":0.3}'
+        alloc_str = os.environ.get("STRATEGY_ALLOCATIONS", default_alloc)
+        try:
+            self.STRATEGY_ALLOCATIONS = json.loads(alloc_str)
+        except (json.JSONDecodeError, TypeError):
+            self.STRATEGY_ALLOCATIONS = {"topdown_etf": 0.3, "momentum": 0.4, "value": 0.3}
+
+        self.MOMENTUM_TOP_N = int(os.environ.get("MOMENTUM_TOP_N", "20"))
+        self.VALUE_TOP_N = int(os.environ.get("VALUE_TOP_N", "15"))
 
     # ── 유틸리티 메서드 (KMP 유래) ──────────────────────────────────
 
