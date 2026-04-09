@@ -82,8 +82,9 @@ class BulkCollector:
         if years is None:
             years = self.years
 
-        today = datetime.now().strftime("%Y%m%d")
-        start = (datetime.now() - timedelta(days=years * 365)).strftime("%Y%m%d")
+        today = self._find_latest_trading_date()
+        start_dt = datetime.strptime(today, "%Y%m%d") - timedelta(days=years * 365)
+        start = start_dt.strftime("%Y%m%d")
         results = []
 
         for market in markets:
@@ -92,8 +93,8 @@ class BulkCollector:
             )
             t0 = _time.time()
 
-            # 1. 종목 목록 수집
-            codes = self._collect_stock_list(market, today)
+            # 1. 종목 목록 수집 (최근 거래일 기준)
+            codes = self._collect_stock_list(market)
             if not codes:
                 logger.warning("%s 종목 목록이 비어 있습니다.", market)
                 continue
@@ -188,7 +189,7 @@ class BulkCollector:
         if markets is None:
             markets = ["KOSPI", "KOSDAQ"]
 
-        today = datetime.now().strftime("%Y%m%d")
+        today = self._find_latest_trading_date()
         results = []
 
         for market in markets:
@@ -209,7 +210,7 @@ class BulkCollector:
             logger.info("%s 증분 업데이트: %s ~ %s", market, start, today)
             t0 = _time.time()
 
-            codes = self._collect_stock_list(market, today)
+            codes = self._collect_stock_list(market)
             if not codes:
                 continue
 
@@ -264,17 +265,93 @@ class BulkCollector:
             "etf": len([s for s in stocks if s["market"] == "ETF"]),
         }
 
-    def _collect_stock_list(self, market: str, date: str) -> list[str]:
-        """종목 목록을 수집하고 코드 리스트를 반환한다."""
-        try:
-            tickers = stock.get_market_ticker_list(date, market=market)
-        except Exception:
-            logger.warning("종목 목록 수집 실패: %s", market)
+    def _collect_stock_list(self, market: str, date: str | None = None) -> list[str]:
+        """종목 목록을 수집하고 코드 리스트를 반환한다.
+
+        pykrx의 get_market_ticker_list를 호출한다.
+        date가 None이거나 KRX에 데이터가 없는 날짜면,
+        날짜 없이 호출하여 pykrx가 최근 영업일을 자동 탐색하게 한다.
+
+        Args:
+            market: 시장 ("KOSPI" | "KOSDAQ").
+            date: 기준일 (YYYYMMDD). None이면 최근 영업일 자동 탐색.
+
+        Returns:
+            종목코드 리스트.
+        """
+        tickers = []
+
+        # 1차: 지정 날짜로 시도
+        if date is not None:
+            try:
+                tickers = stock.get_market_ticker_list(date, market=market)
+            except Exception:
+                logger.debug("종목 목록 수집 실패 (date=%s): 최근 영업일로 재시도", date)
+
+        # 2차: 날짜 없이 호출 — pykrx가 최근 영업일 자동 탐색
+        if not tickers:
+            try:
+                tickers = stock.get_market_ticker_list(market=market)
+            except Exception:
+                pass
+
+        # 3차: 날짜를 하루씩 과거로 이동하며 최대 30일 탐색
+        if not tickers:
+            base = datetime.now()
+            for i in range(1, 31):
+                try_date = (base - timedelta(days=i)).strftime("%Y%m%d")
+                try:
+                    tickers = stock.get_market_ticker_list(try_date, market=market)
+                    if tickers:
+                        logger.info("종목 목록 조회 성공: %s %s (%d종목)", market, try_date, len(tickers))
+                        break
+                except Exception:
+                    continue
+
+        if not tickers:
+            logger.warning("종목 목록 수집 실패: %s (모든 날짜 시도 실패)", market)
             return []
+
         for ticker in tickers:
             try:
                 name = stock.get_market_ticker_name(ticker)
                 self.store.upsert_stock(ticker, name, market)
             except Exception:
                 pass
+
+        logger.info("%s 종목 %d개 로드", market, len(tickers))
         return tickers
+
+    def _find_latest_trading_date(self) -> str:
+        """KRX 데이터가 존재하는 가장 최근 거래일을 찾는다.
+
+        Returns:
+            최근 거래일 (YYYYMMDD).
+        """
+        # 날짜 없이 호출하면 pykrx가 최근 영업일을 자동 탐색
+        try:
+            tickers = stock.get_market_ticker_list(market="KOSPI")
+            if tickers:
+                # OHLCV를 1일 조회해서 날짜 확인
+                df = stock.get_market_ohlcv(
+                    datetime.now().strftime("%Y%m%d"),
+                    datetime.now().strftime("%Y%m%d"),
+                    tickers[0],
+                )
+                if not df.empty:
+                    return df.index[-1].strftime("%Y%m%d")
+        except Exception:
+            pass
+
+        # 폴백: 하루씩 과거로 이동
+        base = datetime.now()
+        for i in range(1, 60):
+            try_date = (base - timedelta(days=i)).strftime("%Y%m%d")
+            try:
+                df = stock.get_market_ohlcv(try_date, try_date, "005930")
+                if not df.empty:
+                    return try_date
+            except Exception:
+                continue
+
+        return (base - timedelta(days=1)).strftime("%Y%m%d")

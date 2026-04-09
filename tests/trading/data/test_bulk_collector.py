@@ -41,14 +41,14 @@ class TestBulkCollector:
 
     def test_update_already_current(self, collector):
         """이미 최신이면 수집하지 않는다."""
-        from datetime import datetime
-
-        today = datetime.now().strftime("%Y%m%d")
-        collector.metadata.set_last_date("KOSPI", "ohlcv", today)
-
-        with patch("alphapulse.trading.data.bulk_collector.stock") as mock_stock:
-            collector.update(markets=["KOSPI"])
-            mock_stock.get_market_ticker_list.assert_not_called()
+        # _find_latest_trading_date가 반환하는 날짜를 last_date와 동일하게 설정
+        with patch.object(
+            collector, "_find_latest_trading_date", return_value="20250404"
+        ):
+            collector.metadata.set_last_date("KOSPI", "ohlcv", "20250404")
+            with patch.object(collector, "_collect_stock_list") as mock_collect:
+                collector.update(markets=["KOSPI"])
+                mock_collect.assert_not_called()
 
     def test_refresh_swallows_exceptions(self, collector):
         """refresh()는 예외를 전파하지 않는다."""
