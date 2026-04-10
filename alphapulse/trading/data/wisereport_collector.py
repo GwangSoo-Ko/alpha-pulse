@@ -17,10 +17,12 @@ from alphapulse.trading.data.store import TradingStore
 
 logger = logging.getLogger(__name__)
 
-WISEREPORT_URL = (
-    "https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx"
-)
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+WISEREPORT_BASE = "https://navercomp.wisereport.co.kr/v2/company"
+WISEREPORT_URL = f"{WISEREPORT_BASE}/c1010001.aspx"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://finance.naver.com",
+}
 
 
 class WisereportCollector:
@@ -173,6 +175,413 @@ class WisereportCollector:
                 len(results), len(codes), date,
             )
         return results
+
+    # ── 기업개요 (c1020001) — 정적 ─────────────────────────────────
+
+    def collect_overview(self, code: str, date: str) -> dict:
+        """기업개요 — 매출구성, R&D 비율, 종업원수, 관계사.
+
+        Args:
+            code: 종목코드.
+            date: 기준일 (YYYYMMDD).
+
+        Returns:
+            파싱된 기업개요 dict. 실패 시 빈 dict.
+        """
+        import json
+
+        try:
+            resp = requests.get(
+                f"{WISEREPORT_BASE}/c1020001.aspx",
+                params={"cmp_cd": code},
+                headers=HEADERS,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return {}
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            data: dict = {}
+
+            for table in soup.select("table"):
+                ths = [th.get_text(strip=True) for th in table.select("tr:first-child th")]
+                if "제품명" in ths and "구성비" in ths:
+                    products = []
+                    for tr in table.select("tr")[1:]:
+                        tds = tr.select("td")
+                        if len(tds) >= 2:
+                            name = tds[0].get_text(strip=True)
+                            ratio = self._parse_number(tds[1].get_text(strip=True))
+                            if name and ratio is not None:
+                                products.append({"name": name, "ratio": ratio})
+                    if products:
+                        data["products"] = json.dumps(products, ensure_ascii=False)
+                    break
+
+            for table in soup.select("table"):
+                if "연구개발비" in table.get_text():
+                    for tr in table.select("tr")[1:2]:
+                        tds = tr.select("td")
+                        if len(tds) >= 3:
+                            data["rd_expense"] = self._parse_number(tds[1].get_text(strip=True))
+                            data["rd_ratio"] = self._parse_number(tds[2].get_text(strip=True))
+                    break
+
+            for table in soup.select("table"):
+                if "기말인원" in table.get_text():
+                    for tr in table.select("tr"):
+                        if "(계)" in tr.get_text():
+                            for td in tr.select("td"):
+                                val = self._parse_number(td.get_text(strip=True))
+                                if val and val > 100:
+                                    data["employees"] = int(val)
+                                    break
+                            break
+                    break
+
+            for table in soup.select("table"):
+                ths = [th.get_text(strip=True) for th in table.select("tr:first-child th, tr:first-child td")]
+                if "관계사명" in ths:
+                    data["subsidiary_count"] = len([tr for tr in table.select("tr")[1:] if tr.select("td")])
+                    break
+
+            if data:
+                self.store.save_company_overview(code, date, **data)
+            return data
+
+        except Exception as e:
+            logger.debug("기업개요 수집 실패: %s: %s", code, e)
+            return {}
+
+    # ── 섹터분석/지분현황 (c1070001) — 정적 ──────────────────────
+
+    def collect_shareholders(self, code: str, date: str) -> dict:
+        """주주 구성 및 지분 변동.
+
+        Args:
+            code: 종목코드.
+            date: 기준일 (YYYYMMDD).
+
+        Returns:
+            주주 데이터 dict. 실패 시 빈 dict.
+        """
+        import json
+
+        try:
+            resp = requests.get(
+                f"{WISEREPORT_BASE}/c1070001.aspx",
+                params={"cmp_cd": code},
+                headers=HEADERS,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return {}
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            data: dict = {}
+
+            for table in soup.select("table"):
+                if "최대주주" in table.get_text() and "유동주식" in table.get_text():
+                    for td in table.select("td"):
+                        pct = re.search(r"([\d.]+)%", td.get_text())
+                        if pct and "유동" in td.parent.get_text():
+                            data["float_pct"] = float(pct.group(1))
+                    break
+
+            for table in soup.select("table"):
+                ths = [th.get_text(strip=True) for th in table.select("tr:first-child th")]
+                if "대표주주" in ths and any("보유지분" in h for h in ths):
+                    rows = table.select("tr")
+                    if len(rows) >= 2:
+                        tds = rows[1].select("td")
+                        if len(tds) >= 4:
+                            data["largest_holder"] = tds[0].get_text(strip=True)[:50]
+                            pct = self._parse_number(tds[3].get_text(strip=True))
+                            if pct is not None:
+                                data["largest_pct"] = pct
+                    changes = []
+                    for tr in rows[1:6]:
+                        tds = tr.select("td")
+                        if len(tds) >= 6:
+                            changes.append({
+                                "holder": tds[1].get_text(strip=True)[:20],
+                                "pct": tds[3].get_text(strip=True),
+                            })
+                    if changes:
+                        data["changes"] = json.dumps(changes, ensure_ascii=False)
+                    break
+
+            if data:
+                self.store.save_shareholder_data(code, date, **data)
+            return data
+
+        except Exception as e:
+            logger.debug("주주현황 수집 실패: %s: %s", code, e)
+            return {}
+
+    # ── 증권사 리포트 (c1080001) — 정적 ──────────────────────────
+
+    def collect_analyst_reports(self, code: str, date: str) -> list[dict]:
+        """증권사 리포트 목록.
+
+        Args:
+            code: 종목코드.
+            date: 기준일 (YYYYMMDD).
+
+        Returns:
+            리포트 리스트. 실패 시 빈 리스트.
+        """
+        try:
+            resp = requests.get(
+                f"{WISEREPORT_BASE}/c1080001.aspx",
+                params={"cmp_cd": code},
+                headers=HEADERS,
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return []
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            reports: list[dict] = []
+
+            for table in soup.select("table"):
+                ths = [th.get_text(strip=True) for th in table.select("tr:first-child th")]
+                if "제목" in ths and "투자의견" in ths:
+                    for tr in table.select("tr")[1:]:
+                        tds = tr.select("td")
+                        if len(tds) < 6:
+                            continue
+                        title = tds[1].get_text(strip=True)[:100]
+                        if not title:
+                            continue
+                        report = {
+                            "report_date": tds[0].get_text(strip=True),
+                            "title": title,
+                            "analyst": tds[2].get_text(strip=True)[:30],
+                            "provider": tds[3].get_text(strip=True)[:20],
+                            "opinion": tds[4].get_text(strip=True)[:10],
+                            "target_price": self._parse_number(tds[5].get_text(strip=True)),
+                        }
+                        reports.append(report)
+                        self.store.save_analyst_report(code=code, **report)
+                    break
+
+            return reports
+
+        except Exception as e:
+            logger.debug("증권사 리포트 수집 실패: %s: %s", code, e)
+            return []
+
+    # ── 투자지표 (c1040001) — crawl4ai ───────────────────────────
+
+    async def collect_investment_indicators(self, code: str, date: str) -> list[dict]:
+        """53개 투자지표 시계열 (수익성/성장성/안정성/활동성).
+
+        Args:
+            code: 종목코드.
+            date: 기준일 (YYYYMMDD).
+
+        Returns:
+            지표 리스트. 실패 시 빈 리스트.
+        """
+        try:
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
+            url = f"{WISEREPORT_BASE}/c1040001.aspx?cmp_cd={code}"
+            browser_config = BrowserConfig(headless=True)
+            run_config = CrawlerRunConfig(wait_until="networkidle", delay_before_return_html=3.0)
+
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                result = await crawler.arun(url=url, config=run_config)
+                if not result.success:
+                    return []
+
+                soup = BeautifulSoup(result.html, "html.parser")
+                indicators: list[dict] = []
+
+                for table in soup.select("table"):
+                    rows = table.select("tr")
+                    if len(rows) < 5:
+                        continue
+                    headers = [th.get_text(strip=True) for th in rows[0].select("th")]
+                    if len(headers) < 3:
+                        continue
+                    periods = headers[1:]
+
+                    for tr in rows[1:]:
+                        tds = tr.select("th, td")
+                        if len(tds) < 2:
+                            continue
+                        name = tds[0].get_text(strip=True)
+                        if not name:
+                            continue
+                        for i, td in enumerate(tds[1:]):
+                            if i >= len(periods):
+                                break
+                            val = self._parse_number(td.get_text(strip=True))
+                            if val is not None:
+                                indicators.append({"period": periods[i], "indicator": name, "value": val})
+                                self.store.save_investment_indicator(code, date, periods[i], name, val)
+
+                return indicators
+
+        except Exception as e:
+            logger.debug("투자지표 수집 실패: %s: %s", code, e)
+            return []
+
+    # ── 컨센서스 (c1050001) — crawl4ai ───────────────────────────
+
+    async def collect_consensus(self, code: str, date: str) -> list[dict]:
+        """추정실적 시계열 (컨센서스).
+
+        Args:
+            code: 종목코드.
+            date: 기준일 (YYYYMMDD).
+
+        Returns:
+            추정실적 리스트. 실패 시 빈 리스트.
+        """
+        try:
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
+            url = f"{WISEREPORT_BASE}/c1050001.aspx?cmp_cd={code}"
+            browser_config = BrowserConfig(headless=True)
+            run_config = CrawlerRunConfig(wait_until="networkidle", delay_before_return_html=3.0)
+
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                result = await crawler.arun(url=url, config=run_config)
+                if not result.success:
+                    return []
+
+                soup = BeautifulSoup(result.html, "html.parser")
+                estimates: list[dict] = []
+                field_map = {"매출액": "revenue", "영업이익": "operating_profit", "순이익": "net_income", "EPS": "eps", "PER": "per"}
+
+                for table in soup.select("table"):
+                    text = table.get_text()
+                    if "매출액" not in text or "영업이익" not in text:
+                        continue
+                    rows = table.select("tr")
+                    headers = [th.get_text(strip=True) for th in rows[0].select("th")]
+                    if len(headers) < 2:
+                        continue
+                    periods = headers[1:]
+                    row_data: dict[str, dict] = {p: {} for p in periods}
+
+                    for tr in rows[1:]:
+                        tds = tr.select("th, td")
+                        if len(tds) < 2:
+                            continue
+                        label = tds[0].get_text(strip=True)
+                        for key, field in field_map.items():
+                            if label.startswith(key):
+                                for i, td in enumerate(tds[1:]):
+                                    if i < len(periods):
+                                        val = self._parse_number(td.get_text(strip=True))
+                                        if val is not None:
+                                            row_data[periods[i]][field] = val
+                                break
+
+                    for period, vals in row_data.items():
+                        if vals:
+                            self.store.save_consensus_estimate(code, date, period, **vals)
+                            estimates.append({"period": period, **vals})
+                    break
+
+                return estimates
+
+        except Exception as e:
+            logger.debug("컨센서스 수집 실패: %s: %s", code, e)
+            return []
+
+    # ── 업종분석 (c1060001) — crawl4ai ───────────────────────────
+
+    async def collect_sector_analysis(self, code: str, date: str) -> dict:
+        """업종 내 순위 및 동종 비교.
+
+        Args:
+            code: 종목코드.
+            date: 기준일 (YYYYMMDD).
+
+        Returns:
+            섹터 분석 dict. 실패 시 빈 dict.
+        """
+        import json
+
+        try:
+            from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+
+            url = f"{WISEREPORT_BASE}/c1060001.aspx?cmp_cd={code}"
+            browser_config = BrowserConfig(headless=True)
+            run_config = CrawlerRunConfig(wait_until="networkidle", delay_before_return_html=3.0)
+
+            async with AsyncWebCrawler(config=browser_config) as crawler:
+                result = await crawler.arun(url=url, config=run_config)
+                if not result.success:
+                    return {}
+
+                soup = BeautifulSoup(result.html, "html.parser")
+                data: dict = {}
+
+                for table in soup.select("table"):
+                    for tr in table.select("tr"):
+                        cells = tr.select("th, td")
+                        if len(cells) >= 2:
+                            label = cells[0].get_text(strip=True)
+                            val = self._parse_number(cells[1].get_text(strip=True))
+                            if "업종PER" in label and val:
+                                data["sector_per"] = val
+                            elif "업종PBR" in label and val:
+                                data["sector_pbr"] = val
+
+                if data:
+                    self.store.save_sector_comparison(
+                        code, date,
+                        sector_per=data.get("sector_per"),
+                        sector_pbr=data.get("sector_pbr"),
+                        comparison_data=json.dumps(data, ensure_ascii=False),
+                    )
+                return data
+
+        except Exception as e:
+            logger.debug("업종분석 수집 실패: %s: %s", code, e)
+            return {}
+
+    # ── 전체 수집 통합 ────────────────────────────────────────────
+
+    def collect_all_static(self, code: str, date: str) -> dict:
+        """모든 정적 데이터를 수집한다 (기업현황+기업개요+주주+리포트).
+
+        Args:
+            code: 종목코드.
+            date: 기준일.
+
+        Returns:
+            탭별 수집 결과 dict.
+        """
+        return {
+            "static": self.collect_static(code, date),
+            "overview": self.collect_overview(code, date),
+            "shareholders": self.collect_shareholders(code, date),
+            "reports": self.collect_analyst_reports(code, date),
+        }
+
+    async def collect_all_dynamic(self, code: str, date: str) -> dict:
+        """모든 JS 렌더링 데이터를 수집한다 (재무+투자지표+컨센서스+업종).
+
+        Args:
+            code: 종목코드.
+            date: 기준일.
+
+        Returns:
+            탭별 수집 결과 dict.
+        """
+        return {
+            "financials": await self.collect_financials(code, date),
+            "indicators": await self.collect_investment_indicators(code, date),
+            "consensus": await self.collect_consensus(code, date),
+            "sector": await self.collect_sector_analysis(code, date),
+        }
 
     # ── 파싱 헬퍼 ──────────────────────────────────────────────────
 

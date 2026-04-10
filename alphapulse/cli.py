@@ -572,6 +572,72 @@ def data_collect_financials(code, market, top):
         click.echo("--code 또는 --market 옵션을 지정하세요.")
 
 
+@data.command("collect-wisereport")
+@click.option("--code", default=None, help="종목코드 (단일 종목)")
+@click.option("--market", default=None, help="시장 (KOSPI/KOSDAQ)")
+@click.option("--top", default=50, type=int, help="상위 N종목")
+@click.option("--full", is_flag=True, help="crawl4ai 포함 전체 수집 (느림)")
+def data_collect_wisereport(code, market, top, full):
+    """wisereport 전체 탭 데이터 수집.
+
+    정적 데이터: 기업현황 + 기업개요 + 주주현황 + 증권사 리포트 (빠름)
+    동적 데이터(--full): 투자지표 + 컨센서스 + 업종분석 (crawl4ai, 느림)
+    """
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.wisereport_collector import WisereportCollector
+
+    cfg = Config()
+    collector = WisereportCollector(cfg.DATA_DIR / "trading.db")
+
+    from datetime import datetime
+    today = datetime.now().strftime("%Y%m%d")
+
+    if code:
+        click.echo(f"wisereport 전체 수집: {code}")
+        static = collector.collect_all_static(code, today)
+        for tab, data in static.items():
+            count = len(data) if isinstance(data, (dict, list)) else 0
+            click.echo(f"  {tab}: {count}건")
+
+        if full:
+            import asyncio
+            click.echo("  crawl4ai 수집 시작...")
+            dynamic = asyncio.run(collector.collect_all_dynamic(code, today))
+            for tab, data in dynamic.items():
+                count = len(data) if isinstance(data, (dict, list)) else 0
+                click.echo(f"  {tab}: {count}건")
+    elif market:
+        from alphapulse.trading.data.store import TradingStore
+        store = TradingStore(cfg.DATA_DIR / "trading.db")
+        stocks = store.get_all_stocks(market=market)
+        if not stocks:
+            click.echo(f"{market} 종목 데이터가 없습니다.")
+            return
+
+        stocks.sort(key=lambda s: s.get("market_cap", 0), reverse=True)
+        codes = [s["code"] for s in stocks[:top]]
+
+        click.echo(f"wisereport 전체 수집: {market} 상위 {len(codes)}종목")
+        for i, c in enumerate(codes, 1):
+            result = collector.collect_all_static(c, today)
+            tabs_ok = sum(1 for v in result.values() if v)
+            click.echo(f"  [{i}/{len(codes)}] {c}: {tabs_ok}/4 탭")
+            import time
+            time.sleep(0.5)
+
+        click.echo(f"정적 수집 완료: {len(codes)}종목")
+
+        if full:
+            import asyncio
+            click.echo("crawl4ai 수집 시작 (느림)...")
+            for i, c in enumerate(codes, 1):
+                result = asyncio.run(collector.collect_all_dynamic(c, today))
+                tabs_ok = sum(1 for v in result.values() if v)
+                click.echo(f"  [{i}/{len(codes)}] {c}: {tabs_ok}/4 탭")
+    else:
+        click.echo("--code 또는 --market 옵션을 지정하세요.")
+
+
 # NOTE: `ap trading backtest` 명령은 Phase 3에서 정의됨.
 #       `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
 

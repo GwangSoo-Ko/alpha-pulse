@@ -322,9 +322,16 @@ ap trading data update
 - 최근 거래일: 삼성전자(005930) 일별 시세 첫 행에서 자동 감지
 
 ```bash
-# 심층 재무 데이터 수집 (crawl4ai 기반, 종목 지정)
+# 심층 재무 데이터 수집 (기본 정적 데이터)
 ap trading data collect-financials --code 005930
 ap trading data collect-financials --market KOSPI --top 50
+
+# wisereport 전체 탭 수집 (기업현황+기업개요+주주+리포트)
+ap trading data collect-wisereport --code 005930
+ap trading data collect-wisereport --market KOSPI --top 50
+
+# crawl4ai 포함 전체 수집 (투자지표+컨센서스+업종분석 추가, 느림)
+ap trading data collect-wisereport --code 005930 --full
 ```
 
 > 이후 매일 `ap trading data update` 또는 TradingEngine이 자동으로 증분 업데이트를 수행한다.
