@@ -114,7 +114,7 @@ class BulkCollector:
 
             result = CollectionResult(market=market)
 
-            # 2. OHLCV 수집 (pykrx 우선)
+            # 2. OHLCV 수집 (pykrx 우선, 이미 최신 데이터 있으면 skip)
             tracker = ProgressTracker(
                 total=len(codes),
                 label=f"[2/5] {market} OHLCV",
@@ -125,6 +125,13 @@ class BulkCollector:
             tracker._completed = len(codes) - len(remaining)
 
             for code in remaining:
+                # 이미 최신 OHLCV가 있으면 skip
+                if self._ohlcv_up_to_date(code, today):
+                    tracker.advance(skipped=True)
+                    tracker.checkpoint(code)
+                    tracker.print_progress(code)
+                    continue
+
                 ok = self.rate_limiter.call_safe(
                     self.stock_collector.collect_ohlcv, code, start, today
                 )
@@ -138,13 +145,27 @@ class BulkCollector:
             result.skipped = s["skipped"]
             tracker.cleanup()
 
-            # 3. 재무제표 수집
-            sys.stderr.write(f"\n  [3/5] {market} 재무제표 수집 중...\n")
-            self.rate_limiter.call_safe(
-                self.fundamental_collector.collect, today, market=market
+            # 3. 재무제표 수집 (병렬 + 진행률)
+            fund_tracker = ProgressTracker(
+                total=len(codes),
+                label=f"[3/5] {market} 재무제표",
+                checkpoint_dir=self.db_path.parent,
             )
+            fund_tracker.start()
+
+            def _fund_progress(code: str) -> None:
+                fund_tracker.advance()
+                fund_tracker.print_progress(code)
+
+            try:
+                self.fundamental_collector.collect(
+                    today, market=market, max_workers=5,
+                    progress_callback=_fund_progress,
+                )
+                fund_tracker.print_summary()
+            except Exception as e:
+                logger.warning("재무제표 수집 실패: %s", e)
             result.fundamentals_count = len(codes)
-            sys.stderr.write("  -> 재무제표 완료\n")
 
             # 4. 수급 수집 (병렬)
             flow_tracker = ProgressTracker(
@@ -309,6 +330,31 @@ class BulkCollector:
             "kosdaq": len([s for s in stocks if s["market"] == "KOSDAQ"]),
             "etf": len([s for s in stocks if s["market"] == "ETF"]),
         }
+
+    def _ohlcv_up_to_date(self, code: str, today: str) -> bool:
+        """종목의 OHLCV가 이미 최신인지 확인한다.
+
+        DB에서 해당 종목의 가장 최근 OHLCV 날짜를 조회하고,
+        오늘(또는 최근 거래일) 데이터가 이미 있으면 True.
+
+        Args:
+            code: 종목코드.
+            today: 최근 거래일 (YYYYMMDD).
+
+        Returns:
+            최신 데이터가 이미 있으면 True.
+        """
+        try:
+            with __import__("sqlite3").connect(self.db_path) as conn:
+                row = conn.execute(
+                    "SELECT MAX(date) FROM ohlcv WHERE code = ?",
+                    (code,),
+                ).fetchone()
+                if row and row[0]:
+                    return row[0] >= today
+        except Exception:
+            pass
+        return False
 
     def _collect_flow_parallel(
         self,
