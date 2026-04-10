@@ -2,6 +2,9 @@
 
 네이버 금융 종목 메인 페이지(finance.naver.com/item/main.naver)에서
 PER, PBR, 배당수익률을 크롤링한다.
+
+기본 PER/PBR은 빠른 수집에 적합하다. 심층 재무 데이터가 필요하면
+WisereportCollector를 사용한다 (시가총액, 베타, 컨센서스, 재무 시계열).
 """
 
 import logging

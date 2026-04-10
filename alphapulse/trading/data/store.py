@@ -83,6 +83,42 @@ class TradingStore:
                     nav REAL,
                     updated_at REAL
                 );
+
+                CREATE TABLE IF NOT EXISTS wisereport_data (
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    -- 시장정보
+                    market_cap REAL,
+                    beta REAL,
+                    foreign_pct REAL,
+                    high_52w REAL,
+                    low_52w REAL,
+                    return_1m REAL,
+                    return_3m REAL,
+                    return_6m REAL,
+                    return_1y REAL,
+                    -- 주요지표 (실적)
+                    per REAL, pbr REAL, pcr REAL,
+                    ev_ebitda REAL,
+                    eps REAL, bps REAL,
+                    dividend_yield REAL,
+                    -- 주요지표 (추정)
+                    est_per REAL, est_eps REAL,
+                    -- 컨센서스
+                    target_price REAL,
+                    analyst_count INTEGER,
+                    consensus_opinion REAL,
+                    -- 재무 (최근 연간)
+                    revenue REAL,
+                    operating_profit REAL,
+                    net_income REAL,
+                    roe REAL,
+                    roa REAL,
+                    debt_ratio REAL,
+                    operating_margin REAL,
+                    net_margin REAL,
+                    PRIMARY KEY (code, date)
+                );
                 """
             )
 
@@ -243,3 +279,38 @@ class TradingStore:
                 (code, days),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    # ── Wisereport ─────────────────────────────────────────────────
+
+    _WISEREPORT_COLUMNS = (
+        "market_cap", "beta", "foreign_pct", "high_52w", "low_52w",
+        "return_1m", "return_3m", "return_6m", "return_1y",
+        "per", "pbr", "pcr", "ev_ebitda", "eps", "bps", "dividend_yield",
+        "est_per", "est_eps",
+        "target_price", "analyst_count", "consensus_opinion",
+        "revenue", "operating_profit", "net_income",
+        "roe", "roa", "debt_ratio", "operating_margin", "net_margin",
+    )
+
+    def save_wisereport(self, code: str, date: str, **kwargs) -> None:
+        """wisereport 데이터를 저장한다."""
+        cols = ", ".join(self._WISEREPORT_COLUMNS)
+        placeholders = ", ".join("?" for _ in self._WISEREPORT_COLUMNS)
+        values = tuple(kwargs.get(c) for c in self._WISEREPORT_COLUMNS)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO wisereport_data "
+                f"(code, date, {cols}) VALUES (?, ?, {placeholders})",
+                (code, date, *values),
+            )
+
+    def get_wisereport(self, code: str) -> dict | None:
+        """가장 최근 wisereport 데이터를 조회한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM wisereport_data "
+                "WHERE code = ? ORDER BY date DESC LIMIT 1",
+                (code,),
+            ).fetchone()
+        return dict(row) if row else None

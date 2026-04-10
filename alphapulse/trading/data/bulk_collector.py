@@ -20,6 +20,7 @@ from alphapulse.trading.data.progress_tracker import ProgressTracker
 from alphapulse.trading.data.rate_limiter import RateLimiter
 from alphapulse.trading.data.stock_collector import StockCollector
 from alphapulse.trading.data.store import TradingStore
+from alphapulse.trading.data.wisereport_collector import WisereportCollector
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class CollectionResult:
     ohlcv_count: int = 0
     fundamentals_count: int = 0
     flow_count: int = 0
+    wisereport_count: int = 0
     skipped: int = 0
     elapsed_seconds: float = 0
 
@@ -63,6 +65,7 @@ class BulkCollector:
         self.stock_collector = StockCollector(db_path)
         self.fundamental_collector = FundamentalCollector(db_path)
         self.flow_collector = FlowCollector(db_path)
+        self.wisereport_collector = WisereportCollector(db_path)
         self.rate_limiter = RateLimiter(delay=delay)
 
     def collect_all(
@@ -161,19 +164,32 @@ class BulkCollector:
             result.flow_count = flow_tracker.summary()["completed"]
             flow_tracker.cleanup()
 
+            # 5. wisereport 정적 데이터 수집
+            try:
+                ws_results = self.wisereport_collector.collect_static_batch(
+                    codes, today
+                )
+                result.wisereport_count = len(ws_results)
+            except Exception as e:
+                logger.warning("wisereport 수집 실패 (무시): %s", e)
+
             # 메타데이터 갱신
             self.metadata.set_last_date(market, "ohlcv", today)
             self.metadata.set_last_date(market, "fundamentals", today)
             self.metadata.set_last_date(market, "flow", today)
+            if result.wisereport_count > 0:
+                self.metadata.set_last_date(market, "wisereport", today)
 
             result.elapsed_seconds = _time.time() - t0
             results.append(result)
             logger.info(
-                "=== %s 완료: OHLCV %d, 재무 %d, 수급 %d (%.0f초) ===",
+                "=== %s 완료: OHLCV %d, 재무 %d, 수급 %d, "
+                "wisereport %d (%.0f초) ===",
                 market,
                 result.ohlcv_count,
                 result.fundamentals_count,
                 result.flow_count,
+                result.wisereport_count,
                 result.elapsed_seconds,
             )
 
@@ -240,10 +256,21 @@ class BulkCollector:
                 )
             result.flow_count = len(codes)
 
+            # wisereport 정적 데이터
+            try:
+                ws_results = self.wisereport_collector.collect_static_batch(
+                    codes, today
+                )
+                result.wisereport_count = len(ws_results)
+            except Exception as e:
+                logger.warning("wisereport 증분 수집 실패 (무시): %s", e)
+
             # 메타데이터 갱신
             self.metadata.set_last_date(market, "ohlcv", today)
             self.metadata.set_last_date(market, "fundamentals", today)
             self.metadata.set_last_date(market, "flow", today)
+            if result.wisereport_count > 0:
+                self.metadata.set_last_date(market, "wisereport", today)
 
             result.elapsed_seconds = _time.time() - t0
             results.append(result)

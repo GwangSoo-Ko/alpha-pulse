@@ -311,12 +311,21 @@ ap trading data update
 - `stock_investor_flow`: 종목별 외국인/기관 수급
 - `collection_metadata`: 마지막 수집일 추적
 
-**데이터 소스 (네이버 금융 크롤링 통일):**
-- 종목 목록: `sise_market_sum.naver` (KOSPI/KOSDAQ 시가총액 페이지)
-- OHLCV: `sise_day.naver` (종목별 일별 시세)
-- 수급: `frgn.naver` (외국인/기관 순매매량)
-- 재무: `item/main.naver` (PER/PBR/배당수익률)
+**데이터 소스:**
+- 종목 목록: `sise_market_sum.naver` (requests+BS4, 빠름)
+- OHLCV: `sise_day.naver` (requests+BS4, 빠름)
+- 수급: `frgn.naver` (requests+BS4, 빠름)
+- 기본 재무: `item/main.naver` (requests+BS4, PER/PBR/배당수익률)
+- **심층 재무** (wisereport): `navercomp.wisereport.co.kr` (requests+BS4 정적 / crawl4ai 동적)
+  - 정적: 시가총액, 베타, 수익률, 컨센서스, 주요지표(PER/PBR/EPS/BPS)
+  - 동적(crawl4ai): 재무 시계열 (매출액, 영업이익, ROE, ROA, 부채비율)
 - 최근 거래일: 삼성전자(005930) 일별 시세 첫 행에서 자동 감지
+
+```bash
+# 심층 재무 데이터 수집 (crawl4ai 기반, 종목 지정)
+ap trading data collect-financials --code 005930
+ap trading data collect-financials --market KOSPI --top 50
+```
 
 > 이후 매일 `ap trading data update` 또는 TradingEngine이 자동으로 증분 업데이트를 수행한다.
 

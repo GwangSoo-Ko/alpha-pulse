@@ -524,6 +524,54 @@ def data_status():
         )
 
 
+@data.command("collect-financials")
+@click.option("--code", default=None, help="종목코드 (단일 종목)")
+@click.option("--market", default=None, help="시장 (KOSPI/KOSDAQ)")
+@click.option("--top", default=50, type=int, help="상위 N종목 (시가총액 기준)")
+def data_collect_financials(code, market, top):
+    """wisereport 재무 데이터 수집 (crawl4ai 기반).
+
+    단일 종목 또는 시장 상위 N종목의 심층 재무 데이터를 수집한다.
+    정적 데이터(시장정보, 주요지표, 컨센서스)를 requests로 빠르게 수집한다.
+    """
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.wisereport_collector import WisereportCollector
+
+    cfg = Config()
+    db_path = cfg.DATA_DIR / "trading.db"
+    collector = WisereportCollector(db_path)
+
+    from datetime import datetime
+    today = datetime.now().strftime("%Y%m%d")
+
+    if code:
+        click.echo(f"wisereport 수집: {code}")
+        data = collector.collect_static(code, today)
+        if data:
+            click.echo(f"  수집 완료: {len(data)}개 필드")
+            for k, v in sorted(data.items()):
+                click.echo(f"    {k}: {v}")
+        else:
+            click.echo("  수집 실패 (데이터 없음)")
+    elif market:
+        from alphapulse.trading.data.store import TradingStore
+        store = TradingStore(db_path)
+        stocks = store.get_all_stocks(market=market)
+        if not stocks:
+            click.echo(f"{market} 종목 데이터가 없습니다.")
+            return
+
+        # 시가총액 기준 상위 N종목
+        stocks.sort(key=lambda s: s.get("market_cap", 0), reverse=True)
+        codes = [s["code"] for s in stocks[:top]]
+
+        click.echo(f"wisereport 수집: {market} 상위 {len(codes)}종목")
+        results = collector.collect_static_batch(codes, today)
+        click.echo(f"수집 완료: {len(results)}/{len(codes)}종목")
+    else:
+        click.echo("--code 또는 --market 옵션을 지정하세요.")
+
+
 # NOTE: `ap trading backtest` 명령은 Phase 3에서 정의됨.
 #       `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
 
