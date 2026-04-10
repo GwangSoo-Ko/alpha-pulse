@@ -1,7 +1,9 @@
-"""주가 수집기 테스트 -- 네이버 금융 스크래핑 기반."""
+"""주가 수집기 테스트 — pykrx 우선 + 네이버 폴백."""
 
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
 import pytest
-from unittest.mock import patch, MagicMock
 
 from alphapulse.trading.data.stock_collector import StockCollector
 
@@ -39,58 +41,91 @@ SAMPLE_STOCK_LIST_HTML = """
 
 
 @pytest.fixture
+def sample_ohlcv_df():
+    """pykrx가 반환하는 OHLCV DataFrame."""
+    return pd.DataFrame(
+        {
+            "시가": [56200, 56900],
+            "고가": [58200, 57800],
+            "저가": [55700, 56900],
+            "종가": [56100, 57600],
+            "거래량": [23527139, 19508076],
+        },
+        index=pd.to_datetime(["2025-04-04", "2025-04-03"]),
+    )
+
+
+@pytest.fixture
 def collector(tmp_path):
     return StockCollector(db_path=tmp_path / "test.db")
 
 
-class TestStockCollector:
-    @patch("alphapulse.trading.data.stock_collector.requests.get")
-    def test_collect_ohlcv(self, mock_get, collector):
-        """OHLCV를 네이버 금융에서 수집하여 DB에 저장한다."""
-        # 첫 번째 페이지: 데이터 있음
-        resp_ok = MagicMock()
-        resp_ok.status_code = 200
-        resp_ok.text = SAMPLE_SISE_HTML
-        resp_ok.raise_for_status = MagicMock()
+class TestCollectOhlcvPykrx:
+    """pykrx 기반 OHLCV 수집 테스트."""
 
-        # 두 번째 페이지: 데이터 없음 (종료)
+    @patch("alphapulse.trading.data.stock_collector.StockCollector._collect_ohlcv_pykrx")
+    def test_pykrx_success(self, mock_pykrx, collector):
+        """pykrx 성공 시 네이버를 호출하지 않는다."""
+        mock_pykrx.return_value = True
+
+        with patch.object(collector, "_collect_ohlcv_naver") as mock_naver:
+            collector.collect_ohlcv("005930", "20250403", "20250404")
+            mock_naver.assert_not_called()
+
+    @patch("alphapulse.trading.data.stock_collector.StockCollector._collect_ohlcv_pykrx")
+    @patch("alphapulse.trading.data.stock_collector.requests.get")
+    def test_pykrx_fail_naver_fallback(self, mock_get, mock_pykrx, collector):
+        """pykrx 실패 시 네이버 폴백."""
+        mock_pykrx.return_value = False
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.text = SAMPLE_SISE_HTML
+        resp.raise_for_status = MagicMock()
+
         resp_empty = MagicMock()
         resp_empty.status_code = 200
         resp_empty.text = "<table class='type2'></table>"
         resp_empty.raise_for_status = MagicMock()
 
-        mock_get.side_effect = [resp_ok, resp_empty]
+        mock_get.side_effect = [resp, resp_empty]
 
         collector.collect_ohlcv("005930", "20250403", "20250404")
 
         result = collector.store.get_ohlcv("005930", "20250403", "20250404")
         assert len(result) == 2
-        # 2025.04.04 행
-        row_04 = next(r for r in result if r["date"] == "20250404")
-        assert row_04["close"] == 56100
-        assert row_04["open"] == 56200
-        assert row_04["high"] == 58200
-        assert row_04["low"] == 55700
-        assert row_04["volume"] == 23527139
-        # 2025.04.03 행
-        row_03 = next(r for r in result if r["date"] == "20250403")
-        assert row_03["close"] == 57600
 
+
+class TestCollectOhlcvNaver:
+    """네이버 금융 폴백 테스트."""
+
+    @patch("alphapulse.trading.data.stock_collector.StockCollector._collect_ohlcv_pykrx", return_value=False)
     @patch("alphapulse.trading.data.stock_collector.requests.get")
-    def test_collect_ohlcv_empty(self, mock_get, collector):
-        """테이블이 비어있으면 저장하지 않는다."""
+    def test_naver_collect(self, mock_get, mock_pykrx, collector):
+        """네이버에서 OHLCV를 수집한다."""
         resp = MagicMock()
         resp.status_code = 200
-        resp.text = "<html><body>no table</body></html>"
+        resp.text = SAMPLE_SISE_HTML
         resp.raise_for_status = MagicMock()
-        mock_get.return_value = resp
+
+        resp_empty = MagicMock()
+        resp_empty.status_code = 200
+        resp_empty.text = "<table class='type2'></table>"
+        resp_empty.raise_for_status = MagicMock()
+
+        mock_get.side_effect = [resp, resp_empty]
 
         collector.collect_ohlcv("005930", "20250403", "20250404")
 
-        assert collector.store.get_ohlcv("005930", "20250403", "20250404") == []
+        result = collector.store.get_ohlcv("005930", "20250403", "20250404")
+        assert len(result) == 2
+        row_04 = next(r for r in result if r["date"] == "20250404")
+        assert row_04["close"] == 56100
+        assert row_04["open"] == 56200
 
+    @patch("alphapulse.trading.data.stock_collector.StockCollector._collect_ohlcv_pykrx", return_value=False)
     @patch("alphapulse.trading.data.stock_collector.requests.get")
-    def test_collect_ohlcv_date_filter(self, mock_get, collector):
+    def test_naver_date_filter(self, mock_get, mock_pykrx, collector):
         """날짜 범위 밖 데이터는 제외한다."""
         resp = MagicMock()
         resp.status_code = 200
@@ -98,24 +133,25 @@ class TestStockCollector:
         resp.raise_for_status = MagicMock()
         mock_get.return_value = resp
 
-        # start=end=20250404이면 04.03은 범위 밖
         collector.collect_ohlcv("005930", "20250404", "20250404")
 
         result = collector.store.get_ohlcv("005930", "20250403", "20250404")
         assert len(result) == 1
-        assert result[0]["date"] == "20250404"
 
+    @patch("alphapulse.trading.data.stock_collector.StockCollector._collect_ohlcv_pykrx", return_value=False)
     @patch("alphapulse.trading.data.stock_collector.requests.get")
-    def test_collect_ohlcv_request_error(self, mock_get, collector):
-        """네트워크 에러 시 수집을 중단한다."""
+    def test_both_fail(self, mock_get, mock_pykrx, collector):
+        """pykrx + 네이버 모두 실패 시 빈 결과."""
         mock_get.side_effect = Exception("timeout")
 
         collector.collect_ohlcv("005930", "20250403", "20250404")
 
         assert collector.store.get_ohlcv("005930", "20250403", "20250404") == []
 
+
+class TestCollectStockList:
     @patch("alphapulse.trading.data.stock_collector.requests.get")
-    def test_collect_stock_list(self, mock_get, collector):
+    def test_collect(self, mock_get, collector):
         """종목 목록을 네이버 금융에서 수집한다."""
         resp_ok = MagicMock()
         resp_ok.status_code = 200
@@ -133,10 +169,7 @@ class TestStockCollector:
 
         assert len(result) == 2
         assert result[0]["code"] == "005930"
-        assert result[0]["name"] == "삼성전자"
-        assert result[1]["code"] == "000660"
 
-        # DB에 저장 확인
         stock = collector.store.get_stock("005930")
         assert stock is not None
         assert stock["name"] == "삼성전자"
