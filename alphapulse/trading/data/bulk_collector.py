@@ -94,34 +94,35 @@ class BulkCollector:
         start = start_dt.strftime("%Y%m%d")
         results = []
 
+        import sys
+
         for market in markets:
-            logger.info(
-                "=== %s 수집 시작 (기간: %s ~ %s) ===", market, start, today
+            sys.stderr.write(
+                f"\n{'='*60}\n"
+                f"  {market} 수집 ({start} ~ {today}) | {years}년치\n"
+                f"{'='*60}\n"
             )
             t0 = _time.time()
 
-            # 1. 종목 목록 수집 (네이버 금융 기반)
+            # 1. 종목 목록 수집
+            sys.stderr.write("\n  [1/4] 종목 목록 수집 중...\n")
             codes = self._collect_stock_list(market)
             if not codes:
-                logger.warning("%s 종목 목록이 비어 있습니다.", market)
+                sys.stderr.write(f"  -> {market} 종목 목록이 비어 있습니다.\n")
                 continue
+            sys.stderr.write(f"  -> {len(codes)}종목 로드 완료\n")
 
             result = CollectionResult(market=market)
 
-            # 2. OHLCV 수집
+            # 2. OHLCV 수집 (pykrx 우선)
             tracker = ProgressTracker(
                 total=len(codes),
-                label=f"{market} OHLCV",
+                label=f"[2/4] {market} OHLCV",
                 checkpoint_dir=self.db_path.parent,
             )
             remaining = tracker.get_resume_point(codes) if resume else codes
-            logger.info(
-                "%s OHLCV: %d종목 (%d건 재개)",
-                market,
-                len(codes),
-                len(codes) - len(remaining),
-            )
             tracker.start()
+            tracker._completed = len(codes) - len(remaining)
 
             for code in remaining:
                 ok = self.rate_limiter.call_safe(
@@ -131,27 +132,31 @@ class BulkCollector:
                 tracker.checkpoint(code)
                 tracker.print_progress(code)
 
+            tracker.print_summary()
             s = tracker.summary()
             result.ohlcv_count = s["completed"] - s["skipped"]
             result.skipped = s["skipped"]
             tracker.cleanup()
 
             # 3. 재무제표 수집
+            sys.stderr.write(f"\n  [3/4] {market} 재무제표 수집 중...\n")
             self.rate_limiter.call_safe(
                 self.fundamental_collector.collect, today, market=market
             )
             result.fundamentals_count = len(codes)
+            sys.stderr.write("  -> 재무제표 완료\n")
 
             # 4. 수급 수집
             flow_tracker = ProgressTracker(
                 total=len(codes),
-                label=f"{market} Flow",
+                label=f"[4/4] {market} 수급",
                 checkpoint_dir=self.db_path.parent,
             )
             flow_remaining = (
                 flow_tracker.get_resume_point(codes) if resume else codes
             )
             flow_tracker.start()
+            flow_tracker._completed = len(codes) - len(flow_remaining)
 
             for code in flow_remaining:
                 self.rate_limiter.call_safe(
@@ -161,6 +166,7 @@ class BulkCollector:
                 flow_tracker.checkpoint(code)
                 flow_tracker.print_progress(code)
 
+            flow_tracker.print_summary()
             result.flow_count = flow_tracker.summary()["completed"]
             flow_tracker.cleanup()
 
