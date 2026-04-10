@@ -159,7 +159,7 @@ class BulkCollector:
             flow_tracker._completed = len(codes) - len(flow_remaining)
 
             self._collect_flow_parallel(
-                flow_remaining, start, today, flow_tracker, max_workers=10,
+                flow_remaining, start, today, flow_tracker, max_workers=5,
             )
 
             flow_tracker.print_summary()
@@ -180,7 +180,7 @@ class BulkCollector:
 
             try:
                 ws_results = self.wisereport_collector.collect_static_batch(
-                    codes, today, max_workers=10, progress_callback=_ws_progress,
+                    codes, today, max_workers=5, progress_callback=_ws_progress,
                 )
                 result.wisereport_count = len(ws_results)
                 ws_tracker.print_summary()
@@ -316,29 +316,55 @@ class BulkCollector:
         start: str,
         end: str,
         tracker: "ProgressTracker",
-        max_workers: int = 10,
+        max_workers: int = 5,
     ) -> None:
-        """수급 데이터를 병렬로 수집한다.
+        """수급 데이터를 안전하게 병렬 수집한다.
 
-        네트워크 I/O가 대부분이므로 ThreadPoolExecutor로 동시 요청하여
-        10배 빠르게 수집한다. 완료 순서대로 진행률을 갱신한다.
+        다음 방어 메커니즘 적용:
+        - max_workers=5 (초당 동시 요청 수 축소)
+        - 전역 rate bucket (초당 8회 제한)
+        - 429 응답 감지 시 지수 백오프 재시도
+        - 요청 간 랜덤 jitter
 
         Args:
             codes: 종목코드 리스트.
             start: 시작일 (YYYYMMDD).
             end: 종료일 (YYYYMMDD).
             tracker: 진행률 추적기.
-            max_workers: 동시 요청 수. 기본 10.
+            max_workers: 동시 요청 수. 기본 5 (안전).
         """
+        import random
         import threading
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        # store 접근 동기화 (SQLite 쓰기 충돌 방지)
+        from alphapulse.trading.data.rate_bucket import RateBucket
+
         store_lock = threading.Lock()
+        rate_bucket = RateBucket(rate=8.0, capacity=8)
+
+        def _fetch_with_retry(url: str, params: dict, headers: dict) -> object | None:
+            """429 지수 백오프 재시도가 적용된 HTTP GET."""
+            import requests
+
+            for attempt in range(3):
+                rate_bucket.acquire()
+                try:
+                    resp = requests.get(url, params=params, headers=headers, timeout=10)
+                    if resp.status_code == 429:
+                        wait = (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning("429 수신. %.1f초 대기 후 재시도", wait)
+                        _time.sleep(wait)
+                        continue
+                    resp.raise_for_status()
+                    return resp
+                except Exception:
+                    if attempt == 2:
+                        return None
+                    _time.sleep(1 + random.uniform(0, 0.5))
+            return None
 
         def _collect_one(code: str) -> tuple[str, bool]:
-            """단일 종목 수집. 저장은 lock 사용."""
-            import requests
+            """단일 종목 수집."""
             from bs4 import BeautifulSoup
 
             url = "https://finance.naver.com/item/frgn.naver"
@@ -348,15 +374,10 @@ class BulkCollector:
             max_pages = 100
 
             while page <= max_pages:
-                try:
-                    resp = requests.get(
-                        url,
-                        params={"code": code, "page": page},
-                        headers=headers,
-                        timeout=10,
-                    )
-                    resp.raise_for_status()
-                except Exception:
+                resp = _fetch_with_retry(
+                    url, {"code": code, "page": page}, headers
+                )
+                if resp is None:
                     break
 
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -397,6 +418,8 @@ class BulkCollector:
                 if reached_start or not found_data:
                     break
                 page += 1
+                # 페이지 간 랜덤 jitter
+                _time.sleep(random.uniform(0.1, 0.3))
 
             if rows:
                 with store_lock:

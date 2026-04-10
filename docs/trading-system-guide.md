@@ -312,10 +312,10 @@ ap trading data update
 - `collection_metadata`: 마지막 수집일 추적
 
 **데이터 소스:**
-- 종목 목록: `sise_market_sum.naver` (requests+BS4, 빠름)
-- OHLCV: `sise_day.naver` (requests+BS4, 빠름)
-- 수급: `frgn.naver` (requests+BS4, 빠름)
-- 기본 재무: `item/main.naver` (requests+BS4, PER/PBR/배당수익률)
+- 종목 목록: `sise_market_sum.naver` (requests+BS4)
+- OHLCV: pykrx `get_market_ohlcv` (1회 호출, 빠름)
+- 수급: `frgn.naver` (병렬 수집, 5 workers)
+- 기본 재무: `item/main.naver` (PER/PBR/배당수익률)
 - **심층 재무** (wisereport): `navercomp.wisereport.co.kr` (requests+BS4 정적 / crawl4ai 동적)
   - 정적: 시가총액, 베타, 수익률, 컨센서스, 주요지표(PER/PBR/EPS/BPS)
   - 동적(crawl4ai): 재무 시계열 (매출액, 영업이익, ROE, ROA, 부채비율)
@@ -343,6 +343,12 @@ ap trading data schedule --force                   # 주기 무시 전체 실행
 ap trading data schedule --top-n 50                # Stage 2 상위 50종목
 ap trading data schedule-status                    # 스케줄 현황
 ```
+
+**네이버 차단 방지 메커니즘:**
+- **전역 rate bucket**: 초당 8회 제한 (토큰 버킷 알고리즘)
+- **max_workers=5**: 동시 요청 수 제한
+- **429 지수 백오프**: 재시도 간격 2s → 4s → 8s (jitter 포함)
+- **랜덤 jitter**: 페이지 간 0.1~0.3초 랜덤 대기
 
 **자율 수집 2단계 전략:**
 - Stage 1: 전종목 기본 데이터 (OHLCV, 수급, PER/PBR, 시가총액) — requests, 빠름

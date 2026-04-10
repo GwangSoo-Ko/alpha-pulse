@@ -137,7 +137,7 @@ class DataScheduler:
                         self.wisereport_collector.collect_analyst_reports(c, today),
                         self.wisereport_collector.collect_shareholders(c, today),
                     ),
-                    max_workers=10,
+                    max_workers=5,
                 )
                 self.metadata.set_last_date("ALL", "reports", today)
                 self.metadata.set_last_date("ALL", "shareholders", today)
@@ -155,7 +155,7 @@ class DataScheduler:
                 self._parallel_per_code(
                     all_codes,
                     lambda c: self.wisereport_collector.collect_overview(c, today),
-                    max_workers=10,
+                    max_workers=5,
                 )
                 self.metadata.set_last_date("ALL", "overview", today)
                 result.executed.append(f"기업개요 ({len(all_codes)}종목)")
