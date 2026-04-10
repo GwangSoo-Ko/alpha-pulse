@@ -1,6 +1,6 @@
 """종목 데이터 SQLite 저장소.
 
-OHLCV, 재무제표, 수급, 공매도 데이터를 trading.db에 저장한다.
+OHLCV, 재무제표, 수급, 공매도, wisereport 전체 탭 데이터를 trading.db에 저장한다.
 """
 
 import sqlite3
@@ -118,6 +118,82 @@ class TradingStore:
                     operating_margin REAL,
                     net_margin REAL,
                     PRIMARY KEY (code, date)
+                );
+
+                -- 기업개요 (c1020001)
+                CREATE TABLE IF NOT EXISTS company_overview (
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    products TEXT,
+                    rd_expense REAL,
+                    rd_ratio REAL,
+                    established TEXT,
+                    listed TEXT,
+                    employees INTEGER,
+                    subsidiary_count INTEGER,
+                    PRIMARY KEY (code, date)
+                );
+
+                -- 투자지표 시계열 (c1040001)
+                CREATE TABLE IF NOT EXISTS investment_indicators (
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    period TEXT NOT NULL,
+                    indicator TEXT NOT NULL,
+                    value REAL,
+                    PRIMARY KEY (code, date, period, indicator)
+                );
+
+                -- 컨센서스 추정실적 (c1050001)
+                CREATE TABLE IF NOT EXISTS consensus_estimates (
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    period TEXT NOT NULL,
+                    revenue REAL,
+                    operating_profit REAL,
+                    net_income REAL,
+                    eps REAL,
+                    per REAL,
+                    analyst_count INTEGER,
+                    PRIMARY KEY (code, date, period)
+                );
+
+                -- 업종 비교 (c1060001)
+                CREATE TABLE IF NOT EXISTS sector_comparison (
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    sector TEXT,
+                    rank_in_sector INTEGER,
+                    sector_per REAL,
+                    sector_pbr REAL,
+                    comparison_data TEXT,
+                    PRIMARY KEY (code, date)
+                );
+
+                -- 지분 현황 (c1070001)
+                CREATE TABLE IF NOT EXISTS shareholder_data (
+                    code TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    largest_holder TEXT,
+                    largest_pct REAL,
+                    foreign_pct REAL,
+                    institutional_pct REAL,
+                    float_pct REAL,
+                    float_shares INTEGER,
+                    changes TEXT,
+                    PRIMARY KEY (code, date)
+                );
+
+                -- 증권사 리포트 (c1080001)
+                CREATE TABLE IF NOT EXISTS analyst_reports (
+                    code TEXT NOT NULL,
+                    report_date TEXT NOT NULL,
+                    analyst TEXT,
+                    provider TEXT,
+                    title TEXT,
+                    opinion TEXT,
+                    target_price REAL,
+                    PRIMARY KEY (code, report_date, provider)
                 );
                 """
             )
@@ -314,3 +390,201 @@ class TradingStore:
                 (code,),
             ).fetchone()
         return dict(row) if row else None
+
+    # ── Company Overview (c1020001) ───────────────────────────────
+
+    _OVERVIEW_COLUMNS = (
+        "products", "rd_expense", "rd_ratio",
+        "established", "listed", "employees", "subsidiary_count",
+    )
+
+    def save_company_overview(self, code: str, date: str, **kwargs) -> None:
+        """기업개요 데이터를 저장한다."""
+        cols = ", ".join(self._OVERVIEW_COLUMNS)
+        placeholders = ", ".join("?" for _ in self._OVERVIEW_COLUMNS)
+        values = tuple(kwargs.get(c) for c in self._OVERVIEW_COLUMNS)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO company_overview "
+                f"(code, date, {cols}) VALUES (?, ?, {placeholders})",
+                (code, date, *values),
+            )
+
+    def get_company_overview(self, code: str) -> dict | None:
+        """가장 최근 기업개요 데이터를 조회한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM company_overview "
+                "WHERE code = ? ORDER BY date DESC LIMIT 1",
+                (code,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ── Investment Indicators (c1040001) ──────────────────────────
+
+    def save_investment_indicators(
+        self, code: str, date: str, rows: list[tuple],
+    ) -> None:
+        """투자지표 시계열을 저장한다.
+
+        Args:
+            code: 종목코드.
+            date: 기준일.
+            rows: (period, indicator, value) 튜플 리스트.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO investment_indicators "
+                "(code, date, period, indicator, value) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [(code, date, p, ind, val) for p, ind, val in rows],
+            )
+
+    def get_investment_indicators(
+        self, code: str, indicator: str | None = None,
+    ) -> list[dict]:
+        """투자지표 시계열을 조회한다."""
+        query = (
+            "SELECT * FROM investment_indicators "
+            "WHERE code = ?"
+        )
+        params: list = [code]
+        if indicator:
+            query += " AND indicator = ?"
+            params.append(indicator)
+        query += " ORDER BY date DESC, period"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Consensus Estimates (c1050001) ────────────────────────────
+
+    def save_consensus_estimates(
+        self, code: str, date: str, rows: list[tuple],
+    ) -> None:
+        """컨센서스 추정실적을 저장한다.
+
+        Args:
+            code: 종목코드.
+            date: 기준일.
+            rows: (period, revenue, op_profit, net_income, eps, per, analyst_count) 튜플.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO consensus_estimates "
+                "(code, date, period, revenue, operating_profit, "
+                "net_income, eps, per, analyst_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (code, date, p, rev, op, ni, eps, per, ac)
+                    for p, rev, op, ni, eps, per, ac in rows
+                ],
+            )
+
+    def get_consensus_estimates(self, code: str) -> list[dict]:
+        """가장 최근 컨센서스 추정실적을 조회한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM consensus_estimates "
+                "WHERE code = ? ORDER BY date DESC, period",
+                (code,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── Sector Comparison (c1060001) ──────────────────────────────
+
+    def save_sector_comparison(self, code: str, date: str, **kwargs) -> None:
+        """업종 비교 데이터를 저장한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO sector_comparison "
+                "(code, date, sector, rank_in_sector, "
+                "sector_per, sector_pbr, comparison_data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    code, date,
+                    kwargs.get("sector"),
+                    kwargs.get("rank_in_sector"),
+                    kwargs.get("sector_per"),
+                    kwargs.get("sector_pbr"),
+                    kwargs.get("comparison_data"),
+                ),
+            )
+
+    def get_sector_comparison(self, code: str) -> dict | None:
+        """가장 최근 업종 비교 데이터를 조회한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM sector_comparison "
+                "WHERE code = ? ORDER BY date DESC LIMIT 1",
+                (code,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ── Shareholder Data (c1070001) ───────────────────────────────
+
+    _SHAREHOLDER_COLUMNS = (
+        "largest_holder", "largest_pct", "foreign_pct",
+        "institutional_pct", "float_pct", "float_shares", "changes",
+    )
+
+    def save_shareholder_data(self, code: str, date: str, **kwargs) -> None:
+        """지분 현황 데이터를 저장한다."""
+        cols = ", ".join(self._SHAREHOLDER_COLUMNS)
+        placeholders = ", ".join("?" for _ in self._SHAREHOLDER_COLUMNS)
+        values = tuple(kwargs.get(c) for c in self._SHAREHOLDER_COLUMNS)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO shareholder_data "
+                f"(code, date, {cols}) VALUES (?, ?, {placeholders})",
+                (code, date, *values),
+            )
+
+    def get_shareholder_data(self, code: str) -> dict | None:
+        """가장 최근 지분 현황 데이터를 조회한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM shareholder_data "
+                "WHERE code = ? ORDER BY date DESC LIMIT 1",
+                (code,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    # ── Analyst Reports (c1080001) ────────────────────────────────
+
+    def save_analyst_reports(self, code: str, rows: list[tuple]) -> None:
+        """증권사 리포트 목록을 저장한다.
+
+        Args:
+            code: 종목코드.
+            rows: (report_date, analyst, provider, title, opinion, target_price) 튜플.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO analyst_reports "
+                "(code, report_date, analyst, provider, "
+                "title, opinion, target_price) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (code, rd, a, p, t, o, tp)
+                    for rd, a, p, t, o, tp in rows
+                ],
+            )
+
+    def get_analyst_reports(
+        self, code: str, limit: int = 20,
+    ) -> list[dict]:
+        """증권사 리포트 목록을 조회한다."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM analyst_reports "
+                "WHERE code = ? ORDER BY report_date DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
