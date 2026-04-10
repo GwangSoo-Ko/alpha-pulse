@@ -24,7 +24,7 @@ class FlowCollector:
     def __init__(self, db_path: str | Path) -> None:
         self.store = TradingStore(db_path)
 
-    def collect(self, code: str, start: str, end: str) -> None:
+    def collect(self, code: str, start: str, end: str) -> bool:
         """종목의 외국인/기관 순매매량을 수집하여 DB에 저장한다.
 
         Args:
@@ -101,6 +101,8 @@ class FlowCollector:
         if rows:
             self.store.save_investor_flow_bulk(rows)
             logger.info("수급 저장: %s (%d건)", code, len(rows))
+            return True
+        return False
 
     @staticmethod
     def _parse_number(text: str) -> int:

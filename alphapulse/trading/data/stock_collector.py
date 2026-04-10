@@ -33,7 +33,7 @@ class StockCollector:
     def __init__(self, db_path: str | Path) -> None:
         self.store = TradingStore(db_path)
 
-    def collect_ohlcv(self, code: str, start: str, end: str) -> None:
+    def collect_ohlcv(self, code: str, start: str, end: str) -> bool:
         """종목의 일별 OHLCV를 수집하여 DB에 저장한다.
 
         pykrx로 1회 호출 시도 후, 실패 시 네이버 금융 폴백.
@@ -42,13 +42,16 @@ class StockCollector:
             code: 종목코드 (예: "005930").
             start: 시작일 (YYYYMMDD).
             end: 종료일 (YYYYMMDD).
+
+        Returns:
+            수집 성공 시 True.
         """
         # 1차: pykrx (1회 호출로 전체 기간, 빠름)
         if self._collect_ohlcv_pykrx(code, start, end):
-            return
+            return True
 
         # 2차: 네이버 금융 (페이지별, 느림)
-        self._collect_ohlcv_naver(code, start, end)
+        return self._collect_ohlcv_naver(code, start, end)
 
     def _collect_ohlcv_pykrx(self, code: str, start: str, end: str) -> bool:
         """pykrx로 OHLCV를 수집한다. 성공 시 True.
@@ -82,7 +85,7 @@ class StockCollector:
             logger.debug("pykrx OHLCV 실패: %s: %s (네이버 폴백)", code, e)
             return False
 
-    def _collect_ohlcv_naver(self, code: str, start: str, end: str) -> None:
+    def _collect_ohlcv_naver(self, code: str, start: str, end: str) -> bool:
         """네이버 금융에서 OHLCV를 페이지별로 스크래핑한다 (느림)."""
         rows = []
         page = 1
@@ -143,6 +146,8 @@ class StockCollector:
         if rows:
             self.store.save_ohlcv_bulk(rows)
             logger.debug("OHLCV (naver): %s (%d건)", code, len(rows))
+            return True
+        return False
 
     def collect_stock_list(self, date: str, market: str = "KOSPI") -> list[dict]:
         """네이버 금융에서 종목 목록을 수집하여 DB에 저장한다.
