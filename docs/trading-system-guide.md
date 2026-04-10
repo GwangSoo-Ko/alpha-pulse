@@ -332,6 +332,10 @@ ap trading data collect-wisereport --market KOSPI --top 50
 
 # crawl4ai 포함 전체 수집 (투자지표+컨센서스+업종분석 추가, 느림)
 ap trading data collect-wisereport --code 005930 --full
+
+# 공매도 데이터 수집 (KRX crawl4ai 기반)
+ap trading data collect-short --code 005930
+ap trading data collect-short --market KOSPI --top 50
 ```
 
 > 이후 매일 `ap trading data update` 또는 TradingEngine이 자동으로 증분 업데이트를 수행한다.

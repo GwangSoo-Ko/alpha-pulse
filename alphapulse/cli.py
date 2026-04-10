@@ -638,6 +638,57 @@ def data_collect_wisereport(code, market, top, full):
         click.echo("--code 또는 --market 옵션을 지정하세요.")
 
 
+@data.command("collect-short")
+@click.option("--code", default=None, help="종목코드 (단일 종목)")
+@click.option("--market", default=None, help="시장 (KOSPI/KOSDAQ)")
+@click.option("--top", default=50, type=int, help="상위 N종목")
+def data_collect_short(code, market, top):
+    """공매도 데이터 수집 (KRX crawl4ai 기반).
+
+    KRX 공매도 통계 페이지에서 일별 공매도 수량/잔고를 수집한다.
+    """
+    import asyncio
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.short_collector import ShortCollector
+
+    cfg = Config()
+    collector = ShortCollector(cfg.DATA_DIR / "trading.db")
+
+    from datetime import datetime, timedelta
+    end = datetime.now().strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
+
+    async def _collect_codes(codes):
+        total = 0
+        for i, c in enumerate(codes, 1):
+            count = await collector.collect_async(c, start, end)
+            click.echo(f"  [{i}/{len(codes)}] {c}: {count}건")
+            total += count
+        return total
+
+    if code:
+        click.echo(f"공매도 수집: {code} ({start}~{end})")
+        count = asyncio.run(collector.collect_async(code, start, end))
+        click.echo(f"수집 완료: {count}건")
+    elif market:
+        from alphapulse.trading.data.store import TradingStore
+        store = TradingStore(cfg.DATA_DIR / "trading.db")
+        stocks = store.get_all_stocks(market=market)
+        if not stocks:
+            click.echo(f"{market} 종목 데이터가 없습니다.")
+            return
+
+        stocks.sort(key=lambda s: s.get("market_cap", 0), reverse=True)
+        codes = [s["code"] for s in stocks[:top]]
+
+        click.echo(f"공매도 수집: {market} 상위 {len(codes)}종목 ({start}~{end})")
+        total = asyncio.run(_collect_codes(codes))
+        click.echo(f"수집 완료: 총 {total}건")
+    else:
+        click.echo("--code 또는 --market 옵션을 지정하세요.")
+
+
 # NOTE: `ap trading backtest` 명령은 Phase 3에서 정의됨.
 #       `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
 
