@@ -105,7 +105,7 @@ class BulkCollector:
             t0 = _time.time()
 
             # 1. 종목 목록 수집
-            sys.stderr.write("\n  [1/4] 종목 목록 수집 중...\n")
+            sys.stderr.write("\n  [1/5] 종목 목록 수집 중...\n")
             codes = self._collect_stock_list(market)
             if not codes:
                 sys.stderr.write(f"  -> {market} 종목 목록이 비어 있습니다.\n")
@@ -117,7 +117,7 @@ class BulkCollector:
             # 2. OHLCV 수집 (pykrx 우선)
             tracker = ProgressTracker(
                 total=len(codes),
-                label=f"[2/4] {market} OHLCV",
+                label=f"[2/5] {market} OHLCV",
                 checkpoint_dir=self.db_path.parent,
             )
             remaining = tracker.get_resume_point(codes) if resume else codes
@@ -139,7 +139,7 @@ class BulkCollector:
             tracker.cleanup()
 
             # 3. 재무제표 수집
-            sys.stderr.write(f"\n  [3/4] {market} 재무제표 수집 중...\n")
+            sys.stderr.write(f"\n  [3/5] {market} 재무제표 수집 중...\n")
             self.rate_limiter.call_safe(
                 self.fundamental_collector.collect, today, market=market
             )
@@ -149,7 +149,7 @@ class BulkCollector:
             # 4. 수급 수집 (병렬)
             flow_tracker = ProgressTracker(
                 total=len(codes),
-                label=f"[4/4] {market} 수급",
+                label=f"[4/5] {market} 수급",
                 checkpoint_dir=self.db_path.parent,
             )
             flow_remaining = (
@@ -166,12 +166,24 @@ class BulkCollector:
             result.flow_count = flow_tracker.summary()["completed"]
             flow_tracker.cleanup()
 
-            # 5. wisereport 정적 데이터 수집
+            # 5. wisereport 정적 데이터 수집 (병렬)
+            ws_tracker = ProgressTracker(
+                total=len(codes),
+                label=f"[5/5] {market} wisereport",
+                checkpoint_dir=self.db_path.parent,
+            )
+            ws_tracker.start()
+
+            def _ws_progress(code: str) -> None:
+                ws_tracker.advance()
+                ws_tracker.print_progress(code)
+
             try:
                 ws_results = self.wisereport_collector.collect_static_batch(
-                    codes, today
+                    codes, today, max_workers=10, progress_callback=_ws_progress,
                 )
                 result.wisereport_count = len(ws_results)
+                ws_tracker.print_summary()
             except Exception as e:
                 logger.warning("wisereport 수집 실패 (무시): %s", e)
 

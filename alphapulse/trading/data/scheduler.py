@@ -127,14 +127,18 @@ class DataScheduler:
         else:
             result.skipped.append("wisereport (이미 최신)")
 
-        # 증권사 리포트 + 주주 (주간)
+        # 증권사 리포트 + 주주 (주간, 병렬)
         if force or self._should_collect("reports", today, "weekly"):
             try:
                 all_codes = self._get_all_codes(markets)
-                for code in all_codes:
-                    self.wisereport_collector.collect_analyst_reports(code, today)
-                    self.wisereport_collector.collect_shareholders(code, today)
-                    _time.sleep(self.delay)
+                self._parallel_per_code(
+                    all_codes,
+                    lambda c: (
+                        self.wisereport_collector.collect_analyst_reports(c, today),
+                        self.wisereport_collector.collect_shareholders(c, today),
+                    ),
+                    max_workers=10,
+                )
                 self.metadata.set_last_date("ALL", "reports", today)
                 self.metadata.set_last_date("ALL", "shareholders", today)
                 result.executed.append(f"리포트+주주 ({len(all_codes)}종목)")
@@ -144,13 +148,15 @@ class DataScheduler:
         else:
             result.skipped.append("리포트+주주 (주간 미도래)")
 
-        # 기업개요 (분기)
+        # 기업개요 (분기, 병렬)
         if force or self._should_collect("overview", today, "quarterly"):
             try:
                 all_codes = self._get_all_codes(markets)
-                for code in all_codes:
-                    self.wisereport_collector.collect_overview(code, today)
-                    _time.sleep(self.delay)
+                self._parallel_per_code(
+                    all_codes,
+                    lambda c: self.wisereport_collector.collect_overview(c, today),
+                    max_workers=10,
+                )
                 self.metadata.set_last_date("ALL", "overview", today)
                 result.executed.append(f"기업개요 ({len(all_codes)}종목)")
             except Exception as e:
@@ -304,6 +310,29 @@ class DataScheduler:
         elif frequency == "quarterly":
             return days_since >= 90
         return True
+
+    def _parallel_per_code(
+        self,
+        codes: list[str],
+        fn,
+        max_workers: int = 10,
+    ) -> None:
+        """종목 리스트에 대해 fn을 병렬 실행한다.
+
+        Args:
+            codes: 종목코드 리스트.
+            fn: code 하나를 받는 callable.
+            max_workers: 동시 실행 수.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(fn, code) for code in codes]
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.debug("병렬 수집 실패: %s", e)
 
     def _get_all_codes(self, markets: list[str]) -> list[str]:
         """전종목 코드 리스트를 반환한다."""
