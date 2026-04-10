@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from pykrx import stock
+import requests
+from bs4 import BeautifulSoup
 
 from alphapulse.trading.data.collection_metadata import CollectionMetadata
 from alphapulse.trading.data.flow_collector import FlowCollector
@@ -21,6 +22,9 @@ from alphapulse.trading.data.stock_collector import StockCollector
 from alphapulse.trading.data.store import TradingStore
 
 logger = logging.getLogger(__name__)
+
+NAVER_SISE_URL = "https://finance.naver.com/item/sise_day.naver"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 @dataclass
@@ -93,7 +97,7 @@ class BulkCollector:
             )
             t0 = _time.time()
 
-            # 1. 종목 목록 수집 (최근 거래일 기준)
+            # 1. 종목 목록 수집 (네이버 금융 기반)
             codes = self._collect_stock_list(market)
             if not codes:
                 logger.warning("%s 종목 목록이 비어 있습니다.", market)
@@ -129,7 +133,7 @@ class BulkCollector:
             result.skipped = s["skipped"]
             tracker.cleanup()
 
-            # 3. 재무제표 수집 (시장 전체 1회 호출)
+            # 3. 재무제표 수집
             self.rate_limiter.call_safe(
                 self.fundamental_collector.collect, today, market=market
             )
@@ -265,114 +269,53 @@ class BulkCollector:
             "etf": len([s for s in stocks if s["market"] == "ETF"]),
         }
 
-    def _collect_stock_list(self, market: str, date: str | None = None) -> list[str]:
-        """종목 목록을 수집하고 코드 리스트를 반환한다.
-
-        1차: pykrx get_market_ticker_list 시도.
-        2차: 네이버 금융 시가총액 페이지 스크래핑 (KRX 로그인 필요 시 폴백).
+    def _collect_stock_list(self, market: str) -> list[str]:
+        """네이버 금융에서 종목 목록을 수집하고 코드 리스트를 반환한다.
 
         Args:
             market: 시장 ("KOSPI" | "KOSDAQ").
-            date: 기준일 (YYYYMMDD). None이면 최근 영업일 자동 탐색.
 
         Returns:
             종목코드 리스트.
         """
-        tickers = []
-
-        # 1차: pykrx 시도
-        try:
-            if date is not None:
-                tickers = stock.get_market_ticker_list(date, market=market)
-            if not tickers:
-                tickers = stock.get_market_ticker_list(market=market)
-        except Exception:
-            pass
-
-        # 2차: 네이버 금융 스크래핑 (pykrx 실패 시)
-        if not tickers:
-            logger.info("%s: pykrx 실패. 네이버 금융에서 종목 목록 수집.", market)
-            tickers = self._scrape_naver_stock_list(market)
-
-        if not tickers:
+        stock_list = self.stock_collector.collect_stock_list(
+            date="", market=market
+        )
+        codes = [s["code"] for s in stock_list]
+        if not codes:
             logger.warning("종목 목록 수집 실패: %s", market)
-            return []
-
-        # DB에 종목 정보 저장
-        for ticker in tickers:
-            try:
-                name = stock.get_market_ticker_name(ticker)
-                self.store.upsert_stock(ticker, name, market)
-            except Exception:
-                # pykrx 이름 조회 실패 시 네이버에서 이미 저장된 이름 유지
-                pass
-
-        logger.info("%s 종목 %d개 로드", market, len(tickers))
-        return tickers
-
-    def _scrape_naver_stock_list(self, market: str) -> list[str]:
-        """네이버 금융 시가총액 페이지에서 종목 목록을 스크래핑한다.
-
-        Args:
-            market: "KOSPI" 또는 "KOSDAQ".
-
-        Returns:
-            종목코드 리스트.
-        """
-        import requests
-        from bs4 import BeautifulSoup
-
-        sosok = "0" if market == "KOSPI" else "1"
-        base_url = "https://finance.naver.com/sise/sise_market_sum.naver"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        tickers = []
-
-        # 최대 40페이지 (페이지당 50종목, KOSPI ~950, KOSDAQ ~1700)
-        max_pages = 40
-        for page in range(1, max_pages + 1):
-            try:
-                resp = requests.get(
-                    base_url,
-                    params={"sosok": sosok, "page": page},
-                    headers=headers,
-                    timeout=10,
-                )
-                resp.raise_for_status()
-                soup = BeautifulSoup(resp.text, "html.parser")
-                links = soup.select("a.tltle")
-                if not links:
-                    break  # 더 이상 종목 없음
-
-                for a in links:
-                    code = a["href"].split("=")[-1]
-                    name = a.text.strip()
-                    tickers.append(code)
-                    self.store.upsert_stock(code, name, market)
-
-            except Exception as e:
-                logger.warning("네이버 금융 %s 페이지 %d 실패: %s", market, page, e)
-                break
-
-        logger.info("네이버 금융에서 %s %d종목 수집", market, len(tickers))
-        return tickers
+        else:
+            logger.info("%s 종목 %d개 로드", market, len(codes))
+        return codes
 
     def _find_latest_trading_date(self) -> str:
-        """pykrx OHLCV가 존재하는 가장 최근 거래일을 찾는다.
+        """네이버 금융에서 가장 최근 거래일을 찾는다.
 
-        삼성전자(005930) OHLCV 조회로 최근 거래일을 탐색한다.
+        삼성전자(005930) 일별 시세 페이지에서 최근 거래일을 추출한다.
 
         Returns:
             최근 거래일 (YYYYMMDD).
         """
-        base = datetime.now()
-        for i in range(0, 60):
-            try_date = (base - timedelta(days=i)).strftime("%Y%m%d")
-            try:
-                df = stock.get_market_ohlcv(try_date, try_date, "005930")
-                if not df.empty:
-                    return df.index[-1].strftime("%Y%m%d")
-            except Exception:
-                continue
+        try:
+            resp = requests.get(
+                NAVER_SISE_URL,
+                params={"code": "005930", "page": 1},
+                headers=HEADERS,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            table = soup.select_one("table.type2")
+            if table:
+                for tr in table.select("tr"):
+                    tds = tr.select("td span")
+                    if len(tds) >= 7:
+                        date_str = tds[0].text.strip().replace(".", "")
+                        if len(date_str) == 8 and date_str.isdigit():
+                            return date_str
+        except Exception as e:
+            logger.warning("최근 거래일 탐색 실패: %s", e)
 
-        # 최종 폴백
+        # 폴백: 어제 날짜
+        base = datetime.now()
         return (base - timedelta(days=1)).strftime("%Y%m%d")
