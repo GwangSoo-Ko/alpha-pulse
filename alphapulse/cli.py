@@ -524,6 +524,67 @@ def data_status():
         )
 
 
+@data.command("schedule")
+@click.option("--market", default="ALL", help="시장 (KOSPI/KOSDAQ/ALL)")
+@click.option("--top-n", default=100, type=int, help="Stage 2 대상 종목 수")
+@click.option("--force", is_flag=True, help="주기 무시하고 전체 실행")
+def data_schedule(market, top_n, force):
+    """자율 데이터 수집 (2단계: 전종목 기본 → 후보 상세).
+
+    Stage 1: 전종목 OHLCV/수급/재무/wisereport (sync, 빠름)
+    Stage 2: 스크리닝 상위 N종목 공매도/재무시계열/투자지표 (crawl4ai)
+    """
+    import asyncio
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.scheduler import DataScheduler
+
+    cfg = Config()
+    scheduler = DataScheduler(db_path=cfg.DATA_DIR / "trading.db", top_n=top_n)
+    markets = ["KOSPI", "KOSDAQ"] if market == "ALL" else [market]
+
+    click.echo(f"자율 수집 시작: {', '.join(markets)} (Stage 2: 상위 {top_n}종목)")
+    if force:
+        click.echo("  --force: 주기 무시, 전체 실행")
+    click.echo()
+
+    result = asyncio.run(scheduler.run(markets=markets, force=force))
+
+    click.echo(f"\n{'='*50}")
+    click.echo(f" 수집 완료 ({result.elapsed_seconds:.0f}초)")
+    click.echo(f"{'='*50}")
+    if result.executed:
+        click.echo(f" 실행: {', '.join(result.executed)}")
+    if result.skipped:
+        click.echo(f" 스킵: {', '.join(result.skipped)}")
+    if result.errors:
+        click.echo(f" 에러: {', '.join(result.errors)}")
+    if result.stage2_codes:
+        click.echo(f" Stage 2 대상: {len(result.stage2_codes)}종목")
+
+
+@data.command("schedule-status")
+def data_schedule_status():
+    """수집 스케줄 현황 조회."""
+    from alphapulse.core.config import Config
+    from alphapulse.trading.data.scheduler import DataScheduler
+
+    cfg = Config()
+    scheduler = DataScheduler(db_path=cfg.DATA_DIR / "trading.db")
+    status = scheduler.get_status()
+
+    freq_labels = {"daily": "매일", "weekly": "주간", "monthly": "월간", "quarterly": "분기"}
+
+    click.echo(f"\n{'데이터':<20} {'주기':<8} {'단계':<8} {'마지막 수집':<12} {'업데이트 필요'}")
+    click.echo(f"{'-'*65}")
+    for name, info in status.items():
+        freq = freq_labels.get(info["frequency"], info["frequency"])
+        stage = f"Stage {info['stage']}"
+        last = info["last_collected"]
+        needs = "예" if info["needs_update"] else "-"
+        click.echo(f" {name:<19} {freq:<8} {stage:<8} {last:<12} {needs}")
+
+
 @data.command("collect-financials")
 @click.option("--code", default=None, help="종목코드 (단일 종목)")
 @click.option("--market", default=None, help="시장 (KOSPI/KOSDAQ)")

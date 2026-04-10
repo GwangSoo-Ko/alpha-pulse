@@ -336,7 +336,26 @@ ap trading data collect-wisereport --code 005930 --full
 # 공매도 데이터 수집 (KRX crawl4ai 기반)
 ap trading data collect-short --code 005930
 ap trading data collect-short --market KOSPI --top 50
+
+# 자율 수집 (2단계: 전종목 기본 → 스크리닝 후 상위 N종목 상세)
+ap trading data schedule                           # 주기에 따라 자동 판단
+ap trading data schedule --force                   # 주기 무시 전체 실행
+ap trading data schedule --top-n 50                # Stage 2 상위 50종목
+ap trading data schedule-status                    # 스케줄 현황
 ```
+
+**자율 수집 2단계 전략:**
+- Stage 1: 전종목 기본 데이터 (OHLCV, 수급, PER/PBR, 시가총액) — requests, 빠름
+- 스크리닝 엔진이 팩터 기반으로 투자 후보 N종목 선정
+- Stage 2: 후보 종목만 상세 데이터 (공매도, 재무 시계열, 투자지표) — crawl4ai
+
+| 주기 | Stage | 데이터 | 대상 |
+|------|-------|--------|------|
+| 매일 | 1 | OHLCV, 수급, 기본재무, wisereport 정적 | 전종목 |
+| 매일 | 2 | 공매도 | 후보 N종목 |
+| 주간 | 1 | 증권사 리포트, 주주 지분 | 전종목 |
+| 월간 | 2 | 재무 시계열, 53개 투자지표, 컨센서스, 업종 | 후보 N종목 |
+| 분기 | 1 | 기업개요 (매출구성, R&D) | 전종목 |
 
 > 이후 매일 `ap trading data update` 또는 TradingEngine이 자동으로 증분 업데이트를 수행한다.
 
