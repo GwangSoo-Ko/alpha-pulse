@@ -44,14 +44,14 @@ class TestBulkCollector:
         ), patch.object(
             collector.fundamental_collector, "collect"
         ), patch.object(
-            collector.flow_collector, "collect"
+            collector, "_collect_flow_parallel"
         ):
             result = collector.collect_all(markets=["KOSPI"], resume=False)
             assert len(result) == 1
             assert result[0].market == "KOSPI"
             collector.stock_collector.collect_ohlcv.assert_called_once()
             collector.fundamental_collector.collect.assert_called_once()
-            collector.flow_collector.collect.assert_called_once()
+            collector._collect_flow_parallel.assert_called_once()
 
     def test_update_when_never_collected(self, collector):
         """미수집 상태에서 update -> collect_all 폴백."""
