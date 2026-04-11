@@ -74,8 +74,9 @@ class FundamentalCollector:
 
                 soup = BeautifulSoup(resp.text, "html.parser")
                 per, pbr, div_yield = self._parse_fundamentals(soup)
+                financial = self._parse_financial_summary(soup)
 
-                if per is not None or pbr is not None:
+                if per is not None or pbr is not None or financial:
                     with store_lock:
                         self.store.save_fundamental(
                             code=code,
@@ -83,6 +84,7 @@ class FundamentalCollector:
                             per=per,
                             pbr=pbr,
                             dividend_yield=div_yield,
+                            **financial,
                         )
                     with collected_lock:
                         collected += 1
@@ -158,13 +160,121 @@ class FundamentalCollector:
 
         return per, pbr, div_yield
 
+    def _parse_financial_summary(self, soup: BeautifulSoup) -> dict:
+        """기업실적분석 테이블에서 ROE/매출/영업이익/부채비율 등을 추출한다.
+
+        네이버 금융 item/main.naver 페이지의 `table.tb_type1.tb_type1_ifrs`는
+        '최근 연간 실적' (보통 3개 연간 + 1개 추정) + '최근 분기 실적' 구조.
+        가장 최근 연간 실적 (E가 아닌 마지막 연간 컬럼) 값을 추출한다.
+
+        Args:
+            soup: BeautifulSoup 파싱 결과.
+
+        Returns:
+            {roe, revenue, operating_profit, net_income, debt_ratio,
+             operating_margin, net_margin} 딕셔너리. 값이 없으면 포함하지 않음.
+        """
+        data: dict = {}
+
+        # 기업실적분석 테이블 찾기
+        table = None
+        for t in soup.select("table.tb_type1"):
+            classes = t.get("class") or []
+            if "tb_type1_ifrs" in classes:
+                tbl_text = t.get_text()
+                if "ROE" in tbl_text and "매출액" in tbl_text:
+                    table = t
+                    break
+
+        if table is None:
+            return data
+
+        # 연간 실적 컬럼 개수 파악
+        # thead 첫 tr에 '주요재무정보', '최근 연간 실적' (colspan=N), '최근 분기 실적' 구조
+        annual_count = 0
+        thead = table.select_one("thead")
+        if thead:
+            first_tr = thead.select_one("tr")
+            if first_tr:
+                for th in first_tr.select("th"):
+                    text = th.get_text(strip=True)
+                    if "연간" in text:
+                        colspan = th.get("colspan")
+                        if colspan:
+                            try:
+                                annual_count = int(colspan)
+                            except ValueError:
+                                pass
+                        break
+
+        if annual_count == 0:
+            return data
+
+        # 두 번째 tr = 실제 기간 헤더
+        period_row = None
+        if thead:
+            trs = thead.select("tr")
+            if len(trs) >= 2:
+                period_row = trs[1]
+        if period_row is None:
+            return data
+
+        # 연간 실적 구간 내에서 E가 아닌 마지막 컬럼 찾기
+        period_ths = period_row.select("th")
+        target_col_idx = None  # 0부터 시작 (데이터 컬럼 기준)
+        for i in range(min(annual_count, len(period_ths))):
+            text = period_ths[i].get_text(strip=True)
+            if "(E)" not in text and re.match(r"\d{4}\.\d{2}", text):
+                target_col_idx = i
+
+        if target_col_idx is None:
+            return data
+
+        # 행별 데이터 추출 (tbody tr)
+        field_map = [
+            ("ROE", "roe"),
+            ("부채비율", "debt_ratio"),
+            ("영업이익률", "operating_margin"),
+            ("순이익률", "net_margin"),
+            ("영업이익", "operating_profit"),
+            ("당기순이익", "net_income"),
+            ("매출액", "revenue"),
+        ]
+
+        tbody = table.select_one("tbody")
+        if tbody is None:
+            return data
+
+        for tr in tbody.select("tr"):
+            # tr 구조: <th>label</th><td>...</td><td>...</td>...
+            label_th = tr.select_one("th")
+            if label_th is None:
+                continue
+            label = label_th.get_text(strip=True)
+
+            tds = tr.select("td")
+            if target_col_idx >= len(tds):
+                continue
+
+            for key, field in field_map:
+                if label.startswith(key):
+                    value = tds[target_col_idx].get_text(strip=True)
+                    parsed = self._extract_number(value)
+                    if parsed is not None:
+                        data[field] = parsed
+                    break
+
+        return data
+
     @staticmethod
     def _extract_number(text: str) -> float | None:
         """'31.73배' 또는 '0.80%' 에서 숫자를 추출한다."""
-        match = re.search(r"([\d.]+)", text)
+        # 음수 처리 + 콤마 제거
+        cleaned = text.strip().replace(",", "")
+        match = re.search(r"-?[\d.]+", cleaned)
         if match:
             try:
-                return float(match.group(1))
+                return float(match.group())
             except ValueError:
                 pass
         return None
