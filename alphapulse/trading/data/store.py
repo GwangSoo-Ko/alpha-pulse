@@ -53,6 +53,31 @@ class TradingStore:
                     PRIMARY KEY (code, date)
                 );
 
+                CREATE TABLE IF NOT EXISTS fundamentals_timeseries (
+                    code TEXT NOT NULL,
+                    period TEXT NOT NULL,
+                    period_type TEXT NOT NULL,
+                    is_estimate INTEGER DEFAULT 0,
+                    revenue REAL,
+                    operating_profit REAL,
+                    net_income REAL,
+                    operating_margin REAL,
+                    net_margin REAL,
+                    roe REAL,
+                    debt_ratio REAL,
+                    quick_ratio REAL,
+                    reserve_ratio REAL,
+                    eps REAL,
+                    per REAL,
+                    bps REAL,
+                    pbr REAL,
+                    dps REAL,
+                    div_yield REAL,
+                    div_payout REAL,
+                    updated_at REAL,
+                    PRIMARY KEY (code, period, period_type)
+                );
+
                 CREATE TABLE IF NOT EXISTS stock_investor_flow (
                     code TEXT NOT NULL,
                     date TEXT NOT NULL,
@@ -293,6 +318,61 @@ class TradingStore:
                 (code,),
             ).fetchone()
         return dict(row) if row else None
+
+    # ── Fundamentals Timeseries (연간/분기 시계열) ─────────────────
+
+    def save_fundamentals_timeseries_bulk(self, rows: list[tuple]) -> None:
+        """재무 시계열 데이터를 대량 저장한다.
+
+        Args:
+            rows: (code, period, period_type, is_estimate, revenue,
+                   operating_profit, net_income, operating_margin, net_margin,
+                   roe, debt_ratio, quick_ratio, reserve_ratio,
+                   eps, per, bps, pbr, dps, div_yield, div_payout)
+        """
+        now = time.time()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO fundamentals_timeseries
+                    (code, period, period_type, is_estimate, revenue,
+                     operating_profit, net_income, operating_margin, net_margin,
+                     roe, debt_ratio, quick_ratio, reserve_ratio,
+                     eps, per, bps, pbr, dps, div_yield, div_payout, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [(*row, now) for row in rows],
+            )
+
+    def get_fundamentals_timeseries(
+        self,
+        code: str,
+        period_type: str | None = None,
+        include_estimate: bool = True,
+    ) -> list[dict]:
+        """종목의 재무 시계열을 조회한다.
+
+        Args:
+            code: 종목코드.
+            period_type: 'annual' | 'quarterly' | None (전체).
+            include_estimate: True이면 추정치 포함.
+
+        Returns:
+            period 오름차순 리스트.
+        """
+        query = "SELECT * FROM fundamentals_timeseries WHERE code = ?"
+        params: list = [code]
+        if period_type:
+            query += " AND period_type = ?"
+            params.append(period_type)
+        if not include_estimate:
+            query += " AND is_estimate = 0"
+        query += " ORDER BY period ASC"
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
 
     # ── Investor Flow ──────────────────────────────────────────────
 

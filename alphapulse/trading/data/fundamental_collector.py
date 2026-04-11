@@ -74,7 +74,30 @@ class FundamentalCollector:
 
                 soup = BeautifulSoup(resp.text, "html.parser")
                 per, pbr, div_yield = self._parse_fundamentals(soup)
-                financial = self._parse_financial_summary(soup)
+
+                # 전체 시계열 파싱
+                ts_rows = self._parse_financial_timeseries(code, soup)
+
+                # 최근 연간 실적 1건을 스냅샷으로
+                latest_annual = None
+                for row in ts_rows:
+                    if row[2] == "annual" and row[3] == 0:  # not estimate
+                        latest_annual = row
+
+                financial = {}
+                if latest_annual:
+                    (_, _, _, _,
+                     revenue, operating_profit, net_income,
+                     operating_margin, net_margin,
+                     roe, debt_ratio, _, _,
+                     _, _, _, _, _, _, _) = latest_annual
+                    financial = {
+                        "revenue": revenue,
+                        "operating_profit": operating_profit,
+                        "net_income": net_income,
+                        "roe": roe,
+                        "debt_ratio": debt_ratio,
+                    }
 
                 if per is not None or pbr is not None or financial:
                     with store_lock:
@@ -86,6 +109,8 @@ class FundamentalCollector:
                             dividend_yield=div_yield,
                             **financial,
                         )
+                        if ts_rows:
+                            self.store.save_fundamentals_timeseries_bulk(ts_rows)
                     with collected_lock:
                         collected += 1
                     return code, True
@@ -159,6 +184,147 @@ class FundamentalCollector:
                 div_yield = self._extract_number(value)
 
         return per, pbr, div_yield
+
+    def _parse_financial_timeseries(
+        self, code: str, soup: BeautifulSoup
+    ) -> list[tuple]:
+        """기업실적분석 테이블에서 전체 시계열 (연간+분기)을 추출한다.
+
+        연간 실적 + 분기 실적 모든 컬럼을 파싱하여 (code, period, period_type,
+        is_estimate, ...) 튜플 리스트로 반환한다.
+
+        Args:
+            code: 종목코드.
+            soup: BeautifulSoup 파싱 결과.
+
+        Returns:
+            save_fundamentals_timeseries_bulk에 전달 가능한 튜플 리스트.
+        """
+        # 테이블 찾기
+        table = None
+        for t in soup.select("table.tb_type1"):
+            classes = t.get("class") or []
+            if "tb_type1_ifrs" in classes:
+                tbl_text = t.get_text()
+                if "ROE" in tbl_text and "매출액" in tbl_text:
+                    table = t
+                    break
+
+        if table is None:
+            return []
+
+        thead = table.select_one("thead")
+        if thead is None:
+            return []
+
+        thead_trs = thead.select("tr")
+        if len(thead_trs) < 2:
+            return []
+
+        # 1st tr: colspan 헤더 (연간/분기 구분)
+        annual_count = 0
+        for th in thead_trs[0].select("th"):
+            text = th.get_text(strip=True)
+            if "연간" in text:
+                try:
+                    annual_count = int(th.get("colspan") or "0")
+                except ValueError:
+                    pass
+                break
+
+        if annual_count == 0:
+            return []
+
+        # 2nd tr: 기간 컬럼
+        period_ths = thead_trs[1].select("th")
+        columns = []  # (col_idx, period, period_type, is_estimate)
+        for i, th in enumerate(period_ths):
+            text = th.get_text(strip=True)
+            m = re.match(r"(\d{4})\.(\d{2})", text)
+            if not m:
+                continue
+            is_estimate = "(E)" in text
+            period = f"{m.group(1)}.{m.group(2)}"
+            period_type = "annual" if i < annual_count else "quarterly"
+            columns.append((i, period, period_type, int(is_estimate)))
+
+        if not columns:
+            return []
+
+        # tbody에서 행별 데이터 수집
+        tbody = table.select_one("tbody")
+        if tbody is None:
+            return []
+
+        # 필드 매핑 (label → field name)
+        # 긴 label을 먼저 매칭 (예: '영업이익률'이 '영업이익'보다 먼저)
+        label_map = [
+            ("영업이익률", "operating_margin"),
+            ("순이익률", "net_margin"),
+            ("당기순이익", "net_income"),
+            ("매출액", "revenue"),
+            ("영업이익", "operating_profit"),
+            ("ROE", "roe"),
+            ("부채비율", "debt_ratio"),
+            ("당좌비율", "quick_ratio"),
+            ("유보율", "reserve_ratio"),
+            ("EPS", "eps"),
+            ("PER", "per"),
+            ("BPS", "bps"),
+            ("PBR", "pbr"),
+            ("주당배당금", "dps"),
+            ("시가배당률", "div_yield"),
+            ("배당성향", "div_payout"),
+        ]
+
+        # period별 dict 초기화
+        period_data: dict = {}
+        for _, period, period_type, is_est in columns:
+            period_data[(period, period_type, is_est)] = {}
+
+        for tr in tbody.select("tr"):
+            label_th = tr.select_one("th")
+            if label_th is None:
+                continue
+            label = label_th.get_text(strip=True)
+
+            # 필드 결정 (긴 key가 먼저 매칭되도록 리스트 순서 유지)
+            field = None
+            for key, f in label_map:
+                if label.startswith(key):
+                    field = f
+                    break
+            if field is None:
+                continue
+
+            tds = tr.select("td")
+            for col_idx, period, period_type, is_est in columns:
+                data_idx = col_idx
+                if data_idx >= len(tds):
+                    continue
+                value = tds[data_idx].get_text(strip=True)
+                parsed = self._extract_number(value)
+                if parsed is not None:
+                    period_data[(period, period_type, is_est)][field] = parsed
+
+        # 튜플 리스트로 변환 (save_fundamentals_timeseries_bulk 형식)
+        rows = []
+        field_order = [
+            "revenue", "operating_profit", "net_income",
+            "operating_margin", "net_margin",
+            "roe", "debt_ratio", "quick_ratio", "reserve_ratio",
+            "eps", "per", "bps", "pbr",
+            "dps", "div_yield", "div_payout",
+        ]
+        for (period, period_type, is_est), values in period_data.items():
+            if not values:
+                continue
+            row = [code, period, period_type, is_est]
+            for f in field_order:
+                row.append(values.get(f))
+            rows.append(tuple(row))
+
+        return rows
 
     def _parse_financial_summary(self, soup: BeautifulSoup) -> dict:
         """기업실적분석 테이블에서 ROE/매출/영업이익/부채비율 등을 추출한다.
