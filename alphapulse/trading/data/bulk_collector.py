@@ -124,9 +124,11 @@ class BulkCollector:
             tracker.start()
             tracker._completed = len(codes) - len(remaining)
 
+            # 이미 최신인 종목 일괄 조회 (빠름)
+            ohlcv_up_to_date = self._get_ohlcv_up_to_date_codes(remaining, today)
+
             for code in remaining:
-                # 이미 최신 OHLCV가 있으면 skip
-                if self._ohlcv_up_to_date(code, today):
+                if code in ohlcv_up_to_date:
                     tracker.advance(skipped=True)
                     tracker.checkpoint(code)
                     tracker.print_progress(code)
@@ -167,7 +169,7 @@ class BulkCollector:
                 logger.warning("재무제표 수집 실패: %s", e)
             result.fundamentals_count = len(codes)
 
-            # 4. 수급 수집 (병렬)
+            # 4. 수급 수집 (병렬, 최신 데이터 있으면 skip)
             flow_tracker = ProgressTracker(
                 total=len(codes),
                 label=f"[4/5] {market} 수급",
@@ -179,8 +181,19 @@ class BulkCollector:
             flow_tracker.start()
             flow_tracker._completed = len(codes) - len(flow_remaining)
 
+            # 이미 최신인 종목은 미리 skip
+            up_to_date_codes = self._get_flow_up_to_date_codes(
+                flow_remaining, today
+            )
+            needs_collect = [c for c in flow_remaining if c not in up_to_date_codes]
+            for code in up_to_date_codes:
+                flow_tracker.advance(skipped=True)
+                flow_tracker.checkpoint(code)
+            if up_to_date_codes:
+                flow_tracker.print_progress("")
+
             self._collect_flow_parallel(
-                flow_remaining, start, today, flow_tracker, max_workers=5,
+                needs_collect, start, today, flow_tracker, max_workers=5,
             )
 
             flow_tracker.print_summary()
@@ -345,7 +358,8 @@ class BulkCollector:
             최신 데이터가 이미 있으면 True.
         """
         try:
-            with __import__("sqlite3").connect(self.db_path) as conn:
+            import sqlite3
+            with sqlite3.connect(self.db_path) as conn:
                 row = conn.execute(
                     "SELECT MAX(date) FROM ohlcv WHERE code = ?",
                     (code,),
@@ -355,6 +369,65 @@ class BulkCollector:
         except Exception:
             pass
         return False
+
+    def _get_ohlcv_up_to_date_codes(
+        self, codes: list[str], today: str
+    ) -> set[str]:
+        """OHLCV 데이터가 이미 최신인 종목 집합을 반환한다.
+
+        Args:
+            codes: 확인할 종목 리스트.
+            today: 최근 거래일 (YYYYMMDD).
+
+        Returns:
+            이미 최신 데이터가 있는 종목코드 집합.
+        """
+        if not codes:
+            return set()
+        try:
+            import sqlite3
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    "SELECT code, MAX(date) FROM ohlcv GROUP BY code"
+                ).fetchall()
+                code_set = set(codes)
+                return {
+                    code for code, max_date in rows
+                    if code in code_set and max_date and max_date >= today
+                }
+        except Exception:
+            return set()
+
+    def _get_flow_up_to_date_codes(
+        self, codes: list[str], today: str
+    ) -> set[str]:
+        """수급 데이터가 이미 최신인 종목 집합을 반환한다.
+
+        전종목을 한 번의 SQL 쿼리로 조회하여 효율적으로 처리한다.
+
+        Args:
+            codes: 확인할 종목 리스트.
+            today: 최근 거래일 (YYYYMMDD).
+
+        Returns:
+            이미 최신 데이터가 있는 종목코드 집합.
+        """
+        if not codes:
+            return set()
+        try:
+            import sqlite3
+            with sqlite3.connect(self.db_path) as conn:
+                rows = conn.execute(
+                    "SELECT code, MAX(date) FROM stock_investor_flow "
+                    "GROUP BY code"
+                ).fetchall()
+                code_set = set(codes)
+                return {
+                    code for code, max_date in rows
+                    if code in code_set and max_date and max_date >= today
+                }
+        except Exception:
+            return set()
 
     def _collect_flow_parallel(
         self,
