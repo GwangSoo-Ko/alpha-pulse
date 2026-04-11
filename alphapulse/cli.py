@@ -407,21 +407,25 @@ def screen(market, top, factor):
             "momentum": 0.5, "flow": 0.3, "volatility": 0.2,
         },
         "value": {
-            "value": 0.4, "quality": 0.2, "debt_ratio": 0.1,
-            "momentum": 0.2, "flow": 0.1,
+            "value": 0.4, "quality": 0.2, "momentum": 0.2,
+            "flow": 0.15, "volatility": 0.05,
         },
         "quality": {
-            "quality": 0.35, "growth": 0.2, "debt_ratio": 0.1,
-            "momentum": 0.2, "value": 0.15,
+            "quality": 0.35, "growth": 0.2, "value": 0.15,
+            "momentum": 0.2, "flow": 0.1,
         },
         "growth": {
-            "growth": 0.4, "profit_growth": 0.2, "momentum": 0.2,
-            "quality": 0.1, "flow": 0.1,
+            "growth": 0.4, "momentum": 0.25, "quality": 0.15,
+            "flow": 0.15, "volatility": 0.05,
         },
+        # 한국 시장 특화 (외국인 수급 + 모멘텀 50%)
         "balanced": {
-            "momentum": 0.20, "value": 0.20, "quality": 0.15,
-            "growth": 0.10, "profit_growth": 0.05, "debt_ratio": 0.05,
-            "flow": 0.15, "volatility": 0.10,
+            "momentum":   0.25,
+            "flow":       0.25,
+            "value":      0.20,
+            "quality":    0.15,
+            "growth":     0.10,
+            "volatility": 0.05,
         },
     }
     weights = weight_presets.get(factor, weight_presets["balanced"])

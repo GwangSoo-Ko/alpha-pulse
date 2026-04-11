@@ -248,8 +248,6 @@ class DataScheduler:
                         "value": value,
                         "quality": calc.quality(s.code),
                         "growth": calc.growth(s.code),
-                        "profit_growth": calc.quality_profit_growth(s.code),
-                        "debt_ratio": calc.quality_debt_ratio(s.code),
                         "flow": calc.flow(s.code),
                         "volatility": calc.volatility(s.code),
                     }
@@ -257,17 +255,18 @@ class DataScheduler:
             if len(factor_data) < 10:
                 return self._fallback_by_market_cap(markets)
 
-            # 시계열 데이터 활용: 모멘텀+밸류+퀄리티+성장성+수급+변동성 균형
+            # 한국 시장 특화 가중치
+            # - 외국인/기관 수급(flow)이 한국 단기 가격에 매우 강한 영향
+            # - 모멘텀 + 수급이 50% 차지 (단기-중기 알파)
+            # - 재무는 value + quality + growth 45% (펀더멘털 견제)
             ranker = MultiFactorRanker(
                 weights={
-                    "momentum":      0.20,
-                    "value":         0.20,
-                    "quality":       0.15,
-                    "growth":        0.10,
-                    "profit_growth": 0.05,
-                    "debt_ratio":    0.05,
-                    "flow":          0.15,
-                    "volatility":    0.10,
+                    "momentum":   0.25,
+                    "flow":       0.25,
+                    "value":      0.20,
+                    "quality":    0.15,
+                    "growth":     0.10,
+                    "volatility": 0.05,
                 }
             )
             signals = ranker.rank(
