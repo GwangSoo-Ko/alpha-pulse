@@ -167,7 +167,7 @@ def make_risk_checked_order_generator(
 
 
 def _get_price(broker, code: str) -> float | None:
-    """브로커에서 현재 가격을 조회한다."""
+    """브로커 또는 브로커의 data_feed에서 현재 가격을 조회한다."""
     # SimBroker에 execution_prices가 있으면 사용
     prices = getattr(broker, "execution_prices", None)
     if isinstance(prices, dict) and code in prices:
@@ -180,5 +180,25 @@ def _get_price(broker, code: str) -> float | None:
             return get_price(code)
         except Exception:
             pass
+
+    # SimBroker는 data_feed를 가지고 있음 — get_latest_price / get_bar 사용
+    data_feed = getattr(broker, "data_feed", None)
+    if data_feed is not None:
+        get_latest = getattr(data_feed, "get_latest_price", None)
+        if callable(get_latest):
+            try:
+                price = get_latest(code)
+                if price is not None:
+                    return price
+            except Exception:
+                pass
+        get_bar = getattr(data_feed, "get_bar", None)
+        if callable(get_bar):
+            try:
+                bar = get_bar(code)
+                if bar is not None:
+                    return getattr(bar, "close", None)
+            except Exception:
+                pass
 
     return None

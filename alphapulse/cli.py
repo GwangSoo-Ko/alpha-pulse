@@ -918,7 +918,6 @@ def backtest(strategy, start, end, capital, market, top):
     from alphapulse.trading.backtest.order_gen import (
         make_default_order_generator,
     )
-    from alphapulse.trading.backtest.sim_broker import SimBroker
     from alphapulse.trading.backtest.store_feed import TradingStoreDataFeed
     from alphapulse.trading.core.cost_model import CostModel
     from alphapulse.trading.screening.factors import FactorCalculator
@@ -989,13 +988,12 @@ def backtest(strategy, start, end, capital, market, top):
 
     click.echo(f"  -> {strat.strategy_id} 로드")
 
-    # 브로커 + 엔진
+    # 엔진 (SimBroker는 엔진 내부에서 생성)
     click.echo("[3/4] 엔진 실행...")
     cost_model = CostModel(
         commission_rate=cfg.BACKTEST_COMMISSION,
         tax_rate_stock=cfg.BACKTEST_TAX,
     )
-    broker = SimBroker(cost_model=cost_model, initial_cash=capital)
     order_gen = make_default_order_generator(top_n=top, initial_capital=capital)
 
     bt_config = BacktestConfig(
@@ -1008,7 +1006,6 @@ def backtest(strategy, start, end, capital, market, top):
         config=bt_config,
         data_feed=data_feed,
         strategies=[strat],
-        broker=broker,
         order_generator=order_gen,
     )
 
@@ -1026,12 +1023,13 @@ def backtest(strategy, start, end, capital, market, top):
     click.echo(f"{'='*60}")
     click.echo(" 성과 지표")
     click.echo(f"{'='*60}")
-    click.echo(f" 총 수익률:        {m.get('total_return', 0) * 100:+.2f}%")
-    click.echo(f" CAGR:             {m.get('cagr', 0) * 100:+.2f}%")
+    # metrics.py는 이미 % 단위로 반환 (× 100 금지)
+    click.echo(f" 총 수익률:        {m.get('total_return', 0):+.2f}%")
+    click.echo(f" CAGR:             {m.get('cagr', 0):+.2f}%")
     click.echo(f" 샤프 비율:        {m.get('sharpe_ratio', 0):+.2f}")
     click.echo(f" 소르티노 비율:    {m.get('sortino_ratio', 0):+.2f}")
-    click.echo(f" 최대 낙폭 (MDD):  {m.get('max_drawdown', 0) * 100:.2f}%")
-    click.echo(f" 변동성 (연환산):  {m.get('volatility', 0) * 100:.2f}%")
+    click.echo(f" 최대 낙폭 (MDD):  {m.get('max_drawdown', 0):.2f}%")
+    click.echo(f" 변동성 (연환산):  {m.get('volatility', 0):.2f}%")
     click.echo(f" 승률:             {m.get('win_rate', 0) * 100:.1f}%")
     click.echo(f" 총 거래 수:       {m.get('total_trades', 0)}")
     click.echo(f" 스냅샷 수:        {len(result.snapshots)}")
