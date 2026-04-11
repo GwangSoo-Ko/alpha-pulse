@@ -148,6 +148,58 @@ class Config:
         self.MOMENTUM_TOP_N = int(os.environ.get("MOMENTUM_TOP_N", "20"))
         self.VALUE_TOP_N = int(os.environ.get("VALUE_TOP_N", "15"))
 
+        # ── Trading: 데이터베이스 경로 ────────────────────────────
+        self.TRADING_DB_PATH = self.DATA_DIR / "trading.db"
+        self.PORTFOLIO_DB_PATH = self.DATA_DIR / "portfolio.db"
+        self.BACKTEST_DB_PATH = self.DATA_DIR / "backtest.db"
+
+        # ── Trading: 백테스트 기본값 ──────────────────────────────
+        self.BACKTEST_INITIAL_CAPITAL = int(
+            os.environ.get("BACKTEST_INITIAL_CAPITAL", "100000000")  # 1억
+        )
+        self.BACKTEST_COMMISSION = float(
+            os.environ.get("BACKTEST_COMMISSION", "0.00015")  # 0.015%
+        )
+        self.BACKTEST_TAX = float(
+            os.environ.get("BACKTEST_TAX", "0.0018")  # 0.18%
+        )
+
+        # ── Trading: Paper Broker 초기 자본 ───────────────────────
+        self.PAPER_INITIAL_CAPITAL = int(
+            os.environ.get("PAPER_INITIAL_CAPITAL", "100000000")  # 1억
+        )
+
+        # ── Trading: 리스크 리밋 ──────────────────────────────────
+        self.MAX_POSITION_WEIGHT = float(
+            os.environ.get("MAX_POSITION_WEIGHT", "0.10")  # 종목당 최대 10%
+        )
+        self.MAX_SECTOR_WEIGHT = float(
+            os.environ.get("MAX_SECTOR_WEIGHT", "0.30")  # 섹터당 최대 30%
+        )
+        self.MAX_DRAWDOWN_SOFT = float(
+            os.environ.get("MAX_DRAWDOWN_SOFT", "0.10")  # -10% 경고
+        )
+        self.MAX_DRAWDOWN_HARD = float(
+            os.environ.get("MAX_DRAWDOWN_HARD", "0.15")  # -15% 강제 축소
+        )
+        self.MAX_DAILY_LOSS = float(
+            os.environ.get("MAX_DAILY_LOSS", "0.03")  # 일간 -3% 중단
+        )
+        self.MIN_CASH_RATIO = float(
+            os.environ.get("MIN_CASH_RATIO", "0.05")  # 최소 현금 5%
+        )
+
+        # ── Trading: 유니버스 필터 ────────────────────────────────
+        self.MIN_MARKET_CAP = float(
+            os.environ.get("MIN_MARKET_CAP", "100000000000")  # 1000억
+        )
+        self.MIN_AVG_VOLUME = float(
+            os.environ.get("MIN_AVG_VOLUME", "1000000000")  # 10억원 (일평균 거래대금)
+        )
+
+        # ── Trading: AI 종합 판단 ─────────────────────────────────
+        self.AI_SYNTHESIS_ENABLED = bool(self.GEMINI_API_KEY)
+
     # ── 유틸리티 메서드 (KMP 유래) ──────────────────────────────────
 
     def get_signal_label(self, score: float) -> str:

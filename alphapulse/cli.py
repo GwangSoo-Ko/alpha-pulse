@@ -773,8 +773,275 @@ def data_collect_short(code, market, top):
         click.echo("--code 또는 --market 옵션을 지정하세요.")
 
 
-# NOTE: `ap trading backtest` 명령은 Phase 3에서 정의됨.
-#       `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
+# NOTE: `ap trading screen` 명령은 Phase 1에서 정의됨 (위 참조).
+
+
+@trading.command()
+@click.option("--strategy", default="momentum",
+              type=click.Choice(["momentum", "value", "quality", "growth",
+                                 "balanced", "topdown_etf"]),
+              help="전략 preset")
+@click.option("--market", default="KOSPI", help="시장")
+@click.option("--top", default=20, type=int, help="상위 N종목")
+def signals(strategy, market, top):
+    """오늘의 전략 시그널 생성 — 실행 없이 확인만.
+
+    screen과 유사하지만 전략별 프리셋을 자동 적용하고,
+    시장 컨텍스트(Market Pulse)를 고려한다.
+    """
+    from alphapulse.core.config import Config
+    from alphapulse.trading.core.adapters import PulseResultAdapter
+    from alphapulse.trading.data.store import TradingStore
+    from alphapulse.trading.data.universe import Universe
+    from alphapulse.trading.screening.factors import FactorCalculator
+    from alphapulse.trading.screening.ranker import MultiFactorRanker
+
+    cfg = Config()
+    store = TradingStore(cfg.TRADING_DB_PATH)
+    universe = Universe(store)
+    stocks = universe.get_by_market(market)
+
+    if not stocks:
+        click.echo(f"{market} 종목 데이터가 없습니다.")
+        return
+
+    # 전략별 가중치 프리셋 (screen과 동일)
+    weight_presets = {
+        "momentum": {
+            "momentum": 0.5, "flow": 0.3, "volatility": 0.2,
+        },
+        "value": {
+            "value": 0.4, "quality": 0.2, "momentum": 0.2,
+            "flow": 0.15, "volatility": 0.05,
+        },
+        "quality": {
+            "quality": 0.35, "growth": 0.2, "value": 0.15,
+            "momentum": 0.2, "flow": 0.1,
+        },
+        "growth": {
+            "growth": 0.4, "momentum": 0.25, "quality": 0.15,
+            "flow": 0.15, "volatility": 0.05,
+        },
+        "balanced": {
+            "momentum": 0.25, "flow": 0.25, "value": 0.20,
+            "quality": 0.15, "growth": 0.10, "volatility": 0.05,
+        },
+        "topdown_etf": {
+            "momentum": 0.5, "flow": 0.3, "volatility": 0.2,
+        },
+    }
+    weights = weight_presets[strategy]
+
+    # Market Pulse 조회 (선택적)
+    market_context = {}
+    try:
+        from alphapulse.market.engine.signal_engine import SignalEngine
+        engine = SignalEngine()
+        pulse = engine.run()
+        market_context = PulseResultAdapter.to_market_context(pulse)
+        click.echo(
+            f"\n[시장 상황] Pulse Score: {market_context['pulse_score']:+.1f} "
+            f"({market_context['pulse_signal']})"
+        )
+    except Exception:
+        click.echo("\n[시장 상황] Market Pulse 조회 실패 (중립으로 처리)")
+
+    # 팩터 계산
+    calc = FactorCalculator(store)
+    factor_data = {}
+    for s in stocks:
+        factor_data[s.code] = {
+            "momentum": calc.momentum(s.code),
+            "value": calc.value(s.code),
+            "quality": calc.quality(s.code),
+            "growth": calc.growth(s.code),
+            "flow": calc.flow(s.code),
+            "volatility": calc.volatility(s.code),
+        }
+
+    ranker = MultiFactorRanker(weights=weights)
+    ranked = ranker.rank(stocks, factor_data, strategy_id=strategy)
+
+    # 매도 우위 시 강도 축소 (momentum 전략 논리)
+    pulse_signal = market_context.get("pulse_signal", "")
+    is_bearish = "bearish" in pulse_signal.lower() or "매도" in pulse_signal
+    if is_bearish and strategy == "momentum":
+        click.echo("[경고] 시장 매도 우위 — 모멘텀 시그널 0.5배 축소")
+        for sig in ranked:
+            sig.score *= 0.5
+
+    # 상위 N 출력
+    signals_top = ranked[:top]
+    click.echo(f"\n{'='*70}")
+    click.echo(f" {market} {strategy} 전략 시그널 (상위 {len(signals_top)})")
+    click.echo(f"{'='*70}")
+    click.echo(f" {'순위':>4}  {'종목코드':>8}  {'종목명':<15}  {'점수':>7}  주요 팩터")
+    click.echo(f" {'-'*68}")
+
+    for i, sig in enumerate(signals_top, 1):
+        top_factor = (
+            max(sig.factors, key=sig.factors.get) if sig.factors else "-"
+        )
+        top_val = sig.factors.get(top_factor, 0) if sig.factors else 0
+        click.echo(
+            f" {i:>4}  {sig.stock.code:>8}  {sig.stock.name:<15}  "
+            f"{sig.score:>+7.1f}  {top_factor}({top_val:.0f})"
+        )
+
+    # 매수/매도 액션 제안
+    action_str = "매수" if not is_bearish else "관망/축소"
+    click.echo(f"\n  권장 액션: {action_str}")
+
+
+@trading.command()
+@click.option("--strategy", default="momentum",
+              help="전략 ID (momentum/value/quality_momentum/topdown_etf)")
+@click.option("--start", default=None, help="시작일 YYYYMMDD (기본 3년 전)")
+@click.option("--end", default=None, help="종료일 YYYYMMDD (기본 오늘)")
+@click.option("--capital", default=None, type=int, help="초기 자본 (원)")
+@click.option("--market", default="KOSPI", help="시장 (KOSPI/KOSDAQ)")
+@click.option("--top", default=20, type=int, help="상위 N종목 편입")
+def backtest(strategy, start, end, capital, market, top):
+    """백테스트 실행 — 전략의 과거 성과 검증.
+
+    예:
+      ap trading backtest --strategy momentum --start 20230101 --end 20260410
+      ap trading backtest --strategy value --capital 200000000 --top 15
+    """
+    from datetime import datetime, timedelta
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.backtest.engine import (
+        BacktestConfig,
+        BacktestEngine,
+    )
+    from alphapulse.trading.backtest.order_gen import (
+        make_default_order_generator,
+    )
+    from alphapulse.trading.backtest.sim_broker import SimBroker
+    from alphapulse.trading.backtest.store_feed import TradingStoreDataFeed
+    from alphapulse.trading.core.cost_model import CostModel
+    from alphapulse.trading.screening.factors import FactorCalculator
+    from alphapulse.trading.screening.ranker import MultiFactorRanker
+    from alphapulse.trading.strategy.momentum import MomentumStrategy
+    from alphapulse.trading.strategy.quality_momentum import (
+        QualityMomentumStrategy,
+    )
+    from alphapulse.trading.strategy.value import ValueStrategy
+
+    cfg = Config()
+    db_path = cfg.TRADING_DB_PATH
+
+    # 기본 날짜 설정
+    if end is None:
+        end = datetime.now().strftime("%Y%m%d")
+    if start is None:
+        start = (datetime.now() - timedelta(days=3 * 365)).strftime("%Y%m%d")
+    if capital is None:
+        capital = cfg.BACKTEST_INITIAL_CAPITAL
+
+    click.echo(f"\n{'='*60}")
+    click.echo(" 백테스트 시작")
+    click.echo(f"{'='*60}")
+    click.echo(f" 전략:    {strategy}")
+    click.echo(f" 기간:    {start} ~ {end}")
+    click.echo(f" 자본금:  {capital:,}원")
+    click.echo(f" 시장:    {market}")
+    click.echo(f" 상위 N:  {top}")
+    click.echo(f"{'='*60}\n")
+
+    # 데이터 피드
+    click.echo("[1/4] 데이터 피드 로드...")
+    data_feed = TradingStoreDataFeed(db_path=db_path, market=market)
+    if not data_feed.codes:
+        click.echo(f"  ERROR: {market} 종목 데이터가 없습니다.")
+        return
+    click.echo(f"  -> {len(data_feed.codes)}종목")
+
+    # 전략 생성
+    click.echo("[2/4] 전략 초기화...")
+    ranker = MultiFactorRanker(weights={
+        "momentum": 0.25, "flow": 0.25, "value": 0.20,
+        "quality": 0.15, "growth": 0.10, "volatility": 0.05,
+    })
+    strategy_map = {
+        "momentum": MomentumStrategy,
+        "value": ValueStrategy,
+        "quality_momentum": QualityMomentumStrategy,
+    }
+    if strategy not in strategy_map:
+        click.echo(f"  ERROR: 지원하지 않는 전략: {strategy}")
+        click.echo(f"  사용 가능: {list(strategy_map.keys())}")
+        return
+
+    strat_cls = strategy_map[strategy]
+    # 일부 전략은 ranker + factor_calc 필요
+    try:
+        factor_calc = FactorCalculator(data_feed.store)
+        strat = strat_cls(
+            ranker=ranker,
+            factor_calc=factor_calc,
+            config={"top_n": top},
+        )
+    except TypeError:
+        # 다른 생성자 시그니처
+        strat = strat_cls(config={"top_n": top})
+
+    click.echo(f"  -> {strat.strategy_id} 로드")
+
+    # 브로커 + 엔진
+    click.echo("[3/4] 엔진 실행...")
+    cost_model = CostModel(
+        commission_rate=cfg.BACKTEST_COMMISSION,
+        tax_rate_stock=cfg.BACKTEST_TAX,
+    )
+    broker = SimBroker(cost_model=cost_model, initial_cash=capital)
+    order_gen = make_default_order_generator(top_n=top, initial_capital=capital)
+
+    bt_config = BacktestConfig(
+        initial_capital=capital,
+        start_date=start,
+        end_date=end,
+        cost_model=cost_model,
+    )
+    engine = BacktestEngine(
+        config=bt_config,
+        data_feed=data_feed,
+        strategies=[strat],
+        broker=broker,
+        order_generator=order_gen,
+    )
+
+    try:
+        result = engine.run()
+    except Exception as e:
+        click.echo(f"\n  ERROR: 백테스트 실패 - {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
+    # 결과 출력
+    click.echo("\n[4/4] 결과 리포트\n")
+    m = result.metrics
+    click.echo(f"{'='*60}")
+    click.echo(" 성과 지표")
+    click.echo(f"{'='*60}")
+    click.echo(f" 총 수익률:        {m.get('total_return', 0) * 100:+.2f}%")
+    click.echo(f" CAGR:             {m.get('cagr', 0) * 100:+.2f}%")
+    click.echo(f" 샤프 비율:        {m.get('sharpe_ratio', 0):+.2f}")
+    click.echo(f" 소르티노 비율:    {m.get('sortino_ratio', 0):+.2f}")
+    click.echo(f" 최대 낙폭 (MDD):  {m.get('max_drawdown', 0) * 100:.2f}%")
+    click.echo(f" 변동성 (연환산):  {m.get('volatility', 0) * 100:.2f}%")
+    click.echo(f" 승률:             {m.get('win_rate', 0) * 100:.1f}%")
+    click.echo(f" 총 거래 수:       {m.get('total_trades', 0)}")
+    click.echo(f" 스냅샷 수:        {len(result.snapshots)}")
+    click.echo(f"{'='*60}")
+
+    if result.snapshots:
+        first = result.snapshots[0]
+        last = result.snapshots[-1]
+        click.echo(f" 시작 자산: {first.total_value:,.0f}원 ({first.date})")
+        click.echo(f" 최종 자산: {last.total_value:,.0f}원 ({last.date})")
 
 
 @trading.command()
@@ -786,7 +1053,7 @@ def run(mode, daemon):
     import asyncio
 
     from alphapulse.trading.core.enums import TradingMode
-    from alphapulse.trading.orchestrator.engine import TradingEngine
+    from alphapulse.trading.orchestrator.factory import build_trading_engine
 
     trading_mode = TradingMode(mode)
 
@@ -794,7 +1061,11 @@ def run(mode, daemon):
     click.echo(f"데몬: {'예' if daemon else '아니오 (1회 실행)'}")
 
     click.echo("TradingEngine 초기화 중...")
-    engine = TradingEngine(mode=trading_mode)
+    try:
+        engine = build_trading_engine(trading_mode)
+    except Exception as e:
+        click.echo(f"엔진 초기화 실패: {e}")
+        return
 
     try:
         if daemon:
@@ -806,7 +1077,11 @@ def run(mode, daemon):
             asyncio.run(scheduler.run_daemon())
         else:
             click.echo("1회 실행 시작")
-            asyncio.run(engine.run_daily())
+            result = asyncio.run(engine.run_daily())
+            click.echo(
+                f"실행 완료: {result.get('signals', 0)}개 전략 시그널 / "
+                f"{result.get('orders_submitted', 0)}건 주문"
+            )
     except KeyboardInterrupt:
         click.echo("\n매매 중단")
     except Exception as e:
@@ -817,6 +1092,7 @@ def run(mode, daemon):
 def status():
     """시스템 상태를 확인한다."""
     from alphapulse.core.config import Config
+    from alphapulse.trading.portfolio.store import PortfolioStore
 
     click.echo("Trading System Status")
     click.echo("=" * 40)
@@ -826,6 +1102,29 @@ def status():
     click.echo(f"실매매: {'활성화' if cfg.LIVE_TRADING_ENABLED else '비활성화'}")
     click.echo(f"일일 한도: {cfg.MAX_DAILY_ORDERS}회 / {cfg.MAX_DAILY_AMOUNT:,}원")
     click.echo(f"전략 배분: {cfg.STRATEGY_ALLOCATIONS}")
+    click.echo(f"초기 자본: {cfg.BACKTEST_INITIAL_CAPITAL:,}원")
+    click.echo(
+        f"리스크 한도: 종목당 {cfg.MAX_POSITION_WEIGHT:.0%} / "
+        f"DD soft {cfg.MAX_DRAWDOWN_SOFT:.0%} / hard {cfg.MAX_DRAWDOWN_HARD:.0%}"
+    )
+    click.echo("-" * 40)
+
+    # 최신 포트폴리오 스냅샷
+    try:
+        store = PortfolioStore(db_path=str(cfg.PORTFOLIO_DB_PATH))
+        mode_str = "paper" if cfg.KIS_IS_PAPER else "live"
+        snapshot = store.get_latest_snapshot(mode=mode_str)
+        if snapshot:
+            click.echo(f"최신 스냅샷 ({mode_str}): {snapshot['date']}")
+            click.echo(f"  총자산: {snapshot['total_value']:,.0f}원")
+            click.echo(f"  현금: {snapshot['cash']:,.0f}원")
+            click.echo(f"  일간: {snapshot['daily_return']:+.2f}%")
+            click.echo(f"  누적: {snapshot['cumulative_return']:+.2f}%")
+            click.echo(f"  드로다운: {snapshot['drawdown']:.2f}%")
+        else:
+            click.echo("스냅샷 없음 (매매 이력 없음).")
+    except Exception as e:
+        click.echo(f"스냅샷 조회 실패: {e}")
 
 
 @trading.command()
@@ -885,25 +1184,118 @@ def portfolio():
 
 
 @portfolio.command(name="show")
-def portfolio_show():
+@click.option("--mode", default="paper",
+              type=click.Choice(["paper", "live", "backtest"]))
+def portfolio_show(mode):
     """현재 포트폴리오 상태를 표시한다."""
-    click.echo("포트폴리오 현황")
+    import json
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.portfolio.store import PortfolioStore
+
+    cfg = Config()
+    store = PortfolioStore(db_path=str(cfg.PORTFOLIO_DB_PATH))
+    snapshot = store.get_latest_snapshot(mode=mode)
+
+    click.echo(f"포트폴리오 현황 ({mode})")
     click.echo("=" * 40)
-    click.echo("(포트폴리오 저장소에서 최신 스냅샷 로드)")
+    if not snapshot:
+        click.echo("스냅샷 없음.")
+        return
+
+    click.echo(f"날짜: {snapshot['date']}")
+    click.echo(f"총자산: {snapshot['total_value']:,.0f}원")
+    click.echo(f"현금: {snapshot['cash']:,.0f}원")
+    click.echo(f"일간 수익률: {snapshot['daily_return']:+.2f}%")
+    click.echo(f"누적 수익률: {snapshot['cumulative_return']:+.2f}%")
+    click.echo(f"드로다운: {snapshot['drawdown']:.2f}%")
+
+    positions = snapshot.get("positions", "[]")
+    try:
+        positions_list = json.loads(positions) if isinstance(positions, str) else positions
+    except (TypeError, json.JSONDecodeError):
+        positions_list = []
+    if positions_list:
+        click.echo("-" * 40)
+        click.echo(f"보유 종목: {len(positions_list)}개")
+        for p in positions_list[:20]:
+            click.echo(
+                f"  {p.get('code', '')} {p.get('name', ''):12s} "
+                f"{p.get('quantity', 0):>6}주 "
+                f"@{p.get('current_price', 0):>10,.0f}"
+            )
 
 
 @portfolio.command(name="history")
 @click.option("--days", default=30, help="조회 기간 (일)")
-def portfolio_history(days):
+@click.option("--mode", default="paper",
+              type=click.Choice(["paper", "live", "backtest"]))
+def portfolio_history(days, mode):
     """포트폴리오 성과 이력을 조회한다."""
-    click.echo(f"최근 {days}일 포트폴리오 이력")
+    from datetime import datetime, timedelta
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.portfolio.store import PortfolioStore
+
+    end = datetime.now().strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+
+    cfg = Config()
+    store = PortfolioStore(db_path=str(cfg.PORTFOLIO_DB_PATH))
+    rows = store.get_snapshots(start=start, end=end, mode=mode)
+
+    click.echo(f"최근 {days}일 포트폴리오 이력 ({mode})")
+    click.echo("=" * 60)
+    if not rows:
+        click.echo("이력 없음.")
+        return
+
+    click.echo(f"{'날짜':<10} {'총자산':>15} {'일간':>8} {'누적':>8} {'DD':>8}")
+    click.echo("-" * 60)
+    for r in rows:
+        click.echo(
+            f"{r['date']:<10} {r['total_value']:>15,.0f} "
+            f"{r['daily_return']:>+7.2f}% "
+            f"{r['cumulative_return']:>+7.2f}% "
+            f"{r['drawdown']:>+7.2f}%"
+        )
 
 
 @portfolio.command(name="attribution")
 @click.option("--days", default=30, help="분석 기간 (일)")
-def portfolio_attribution(days):
+@click.option("--mode", default="paper",
+              type=click.Choice(["paper", "live", "backtest"]))
+def portfolio_attribution(days, mode):
     """성과 귀속 분석을 실행한다."""
-    click.echo(f"최근 {days}일 성과 귀속 분석")
+    import json
+    from datetime import datetime
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.portfolio.store import PortfolioStore
+
+    cfg = Config()
+    store = PortfolioStore(db_path=str(cfg.PORTFOLIO_DB_PATH))
+    date = datetime.now().strftime("%Y%m%d")
+    attr = store.get_attribution(date=date, mode=mode)
+
+    click.echo(f"최근 {days}일 성과 귀속 분석 ({mode})")
+    click.echo("=" * 40)
+    if not attr:
+        click.echo(
+            "attribution 데이터 없음. "
+            "TradingEngine 실행 후 다시 시도하세요."
+        )
+        return
+
+    for key in ("strategy_returns", "factor_returns", "sector_returns"):
+        raw = attr.get(key) or "{}"
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+        except json.JSONDecodeError:
+            parsed = {}
+        click.echo(f"\n[{key}]")
+        for k, v in parsed.items():
+            click.echo(f"  {k}: {v:+.2f}%")
 
 
 @trading.group()
@@ -913,20 +1305,104 @@ def risk():
 
 
 @risk.command(name="report")
-def risk_report():
+@click.option("--mode", default="paper",
+              type=click.Choice(["paper", "live", "backtest"]))
+def risk_report(mode):
     """리스크 리포트를 생성한다."""
-    click.echo("리스크 리포트")
+    from alphapulse.core.config import Config
+    from alphapulse.trading.core.models import PortfolioSnapshot
+    from alphapulse.trading.portfolio.store import PortfolioStore
+    from alphapulse.trading.risk.drawdown import DrawdownManager
+    from alphapulse.trading.risk.limits import RiskLimits
+    from alphapulse.trading.risk.manager import RiskManager
+    from alphapulse.trading.risk.var import VaRCalculator
+
+    cfg = Config()
+    store = PortfolioStore(db_path=str(cfg.PORTFOLIO_DB_PATH))
+    snapshot_row = store.get_latest_snapshot(mode=mode)
+
+    click.echo(f"리스크 리포트 ({mode})")
     click.echo("=" * 40)
+    if not snapshot_row:
+        click.echo("스냅샷 없음 — 리포트 생성 불가.")
+        return
+
+    snapshot = PortfolioSnapshot(
+        date=snapshot_row["date"],
+        cash=snapshot_row["cash"],
+        positions=[],
+        total_value=snapshot_row["total_value"],
+        daily_return=snapshot_row["daily_return"],
+        cumulative_return=snapshot_row["cumulative_return"],
+        drawdown=snapshot_row["drawdown"],
+    )
+
+    limits = RiskLimits(
+        max_position_weight=cfg.MAX_POSITION_WEIGHT,
+        max_drawdown_soft=cfg.MAX_DRAWDOWN_SOFT,
+        max_drawdown_hard=cfg.MAX_DRAWDOWN_HARD,
+    )
+    mgr = RiskManager(
+        limits=limits,
+        var_calc=VaRCalculator(),
+        drawdown_mgr=DrawdownManager(limits=limits),
+    )
+    report = mgr.daily_report(snapshot)
+
+    click.echo(f"드로다운 상태: {report.drawdown_status}")
+    click.echo(f"VaR(95%): {report.var_95:+.2f}%")
+    click.echo(f"CVaR(95%): {report.cvar_95:+.2f}%")
+    if getattr(report, "alerts", None):
+        click.echo("-" * 40)
+        for alert in report.alerts:
+            click.echo(f"  [{alert.level}] {alert.message}")
 
 
 @risk.command(name="stress")
-def risk_stress():
+@click.option("--mode", default="paper",
+              type=click.Choice(["paper", "live", "backtest"]))
+def risk_stress(mode):
     """스트레스 테스트를 실행한다."""
-    click.echo("스트레스 테스트 실행")
+    from alphapulse.core.config import Config
+    from alphapulse.trading.core.models import PortfolioSnapshot
+    from alphapulse.trading.portfolio.store import PortfolioStore
+    from alphapulse.trading.risk.stress_test import StressTest
+
+    cfg = Config()
+    store = PortfolioStore(db_path=str(cfg.PORTFOLIO_DB_PATH))
+    snapshot_row = store.get_latest_snapshot(mode=mode)
+
+    click.echo(f"스트레스 테스트 ({mode})")
+    click.echo("=" * 40)
+    if not snapshot_row:
+        click.echo("스냅샷 없음 — 테스트 불가.")
+        return
+
+    snapshot = PortfolioSnapshot(
+        date=snapshot_row["date"],
+        cash=snapshot_row["cash"],
+        positions=[],
+        total_value=snapshot_row["total_value"],
+        daily_return=snapshot_row["daily_return"],
+        cumulative_return=snapshot_row["cumulative_return"],
+        drawdown=snapshot_row["drawdown"],
+    )
+    tester = StressTest()
+    results = tester.run_all(snapshot)
+    for name, value in results.items():
+        click.echo(f"  {name}: {value:+.2f}%")
 
 
 @risk.command(name="limits")
 def risk_limits():
     """현재 리스크 리밋 설정을 표시한다."""
+    from alphapulse.core.config import Config
+
+    cfg = Config()
     click.echo("리스크 리밋 설정")
     click.echo("=" * 40)
+    click.echo(f"종목당 최대 비중: {cfg.MAX_POSITION_WEIGHT:.0%}")
+    click.echo(f"드로다운 soft: {cfg.MAX_DRAWDOWN_SOFT:.0%}")
+    click.echo(f"드로다운 hard: {cfg.MAX_DRAWDOWN_HARD:.0%}")
+    click.echo(f"일일 주문 한도: {cfg.MAX_DAILY_ORDERS}회")
+    click.echo(f"일일 금액 한도: {cfg.MAX_DAILY_AMOUNT:,}원")

@@ -85,6 +85,14 @@ class PortfolioStore:
                     sector_returns TEXT,
                     PRIMARY KEY (date, mode, run_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS strategy_rebalance (
+                    strategy_id TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    last_rebalance_date TEXT NOT NULL,
+                    updated_at REAL,
+                    PRIMARY KEY (strategy_id, mode)
+                );
                 """
             )
 
@@ -176,6 +184,68 @@ class PortfolioStore:
                 (start, end, mode, run_id),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def get_latest_snapshot(
+        self, mode: str = "paper", run_id: str = ""
+    ) -> dict | None:
+        """지정 모드의 가장 최근 스냅샷을 반환한다.
+
+        Args:
+            mode: 실행 모드.
+            run_id: 백테스트 실행 ID (backtest 모드 전용).
+
+        Returns:
+            최신 스냅샷 딕셔너리 또는 None.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT * FROM snapshots
+                WHERE mode=? AND run_id=?
+                ORDER BY date DESC
+                LIMIT 1
+                """,
+                (mode, run_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def save_snapshot_obj(
+        self,
+        snapshot,
+        mode: str,
+        run_id: str = "",
+    ) -> None:
+        """PortfolioSnapshot 객체 형태로 스냅샷을 저장한다.
+
+        Args:
+            snapshot: PortfolioSnapshot 인스턴스.
+            mode: 실행 모드.
+            run_id: 백테스트 실행 ID.
+        """
+        positions_json = [
+            {
+                "code": p.stock.code,
+                "name": p.stock.name,
+                "quantity": p.quantity,
+                "avg_price": p.avg_price,
+                "current_price": p.current_price,
+                "weight": p.weight,
+                "strategy_id": p.strategy_id,
+            }
+            for p in snapshot.positions
+        ]
+        self.save_snapshot(
+            date=snapshot.date,
+            mode=mode,
+            cash=snapshot.cash,
+            total_value=snapshot.total_value,
+            positions=positions_json,
+            daily_return=snapshot.daily_return,
+            cumulative_return=snapshot.cumulative_return,
+            drawdown=snapshot.drawdown,
+            run_id=run_id,
+        )
 
     # ── Orders ────────────────────────────────────────────────────
 
@@ -317,3 +387,40 @@ class PortfolioStore:
                 (date, mode, run_id),
             ).fetchone()
         return dict(row) if row else None
+
+    # ── Strategy Rebalance Tracking ─────────────────────────────
+
+    def get_last_rebalance(
+        self, strategy_id: str, mode: str = "paper"
+    ) -> str | None:
+        """전략의 마지막 리밸런싱 날짜를 조회한다.
+
+        Args:
+            strategy_id: 전략 ID.
+            mode: 실행 모드 (backtest/paper/live).
+
+        Returns:
+            YYYYMMDD 문자열 또는 None.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT last_rebalance_date FROM strategy_rebalance "
+                "WHERE strategy_id=? AND mode=?",
+                (strategy_id, str(mode)),
+            ).fetchone()
+        return row[0] if row else None
+
+    def set_last_rebalance(
+        self, strategy_id: str, date: str, mode: str = "paper"
+    ) -> None:
+        """전략의 리밸런싱 날짜를 기록한다."""
+        import time
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO strategy_rebalance
+                    (strategy_id, mode, last_rebalance_date, updated_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (strategy_id, str(mode), date, time.time()),
+            )

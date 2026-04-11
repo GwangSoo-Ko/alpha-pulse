@@ -9,6 +9,7 @@ import logging
 from alphapulse.trading.core.enums import RebalanceFreq
 from alphapulse.trading.core.models import Signal, Stock
 from alphapulse.trading.screening.ranker import MultiFactorRanker
+from alphapulse.trading.strategy._factor_helper import _compute_factor_data
 from alphapulse.trading.strategy.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
@@ -30,15 +31,22 @@ class MomentumStrategy(BaseStrategy):
     strategy_id = "momentum"
     rebalance_freq = RebalanceFreq.WEEKLY
 
-    def __init__(self, ranker: MultiFactorRanker, config: dict) -> None:
+    def __init__(
+        self,
+        ranker: MultiFactorRanker,
+        config: dict,
+        factor_calc=None,
+    ) -> None:
         """MomentumStrategy를 초기화한다.
 
         Args:
             ranker: 멀티팩터 랭커.
             config: 전략 설정. top_n(기본 20) 등.
+            factor_calc: (선택) FactorCalculator. 있으면 universe에서 factor_data를 계산.
         """
         super().__init__(config=config)
         self.ranker = ranker
+        self.factor_calc = factor_calc
         self.top_n: int = config.get("top_n", 20)
         self.factor_weights: dict[str, float] = {
             "momentum": 0.6,
@@ -63,7 +71,10 @@ class MomentumStrategy(BaseStrategy):
         pulse_signal = market_context.get("pulse_signal", "neutral")
 
         # 랭커로 종목 점수 산출
-        ranked = self.ranker.rank(universe, strategy_id=self.strategy_id)
+        factor_data = _compute_factor_data(self.factor_calc, universe)
+        ranked = self.ranker.rank(
+            universe, factor_data, strategy_id=self.strategy_id
+        )
 
         # 상위 N 선정
         top_signals = ranked[: self.top_n]

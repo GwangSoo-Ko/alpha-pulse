@@ -9,6 +9,7 @@ import logging
 from alphapulse.trading.core.enums import RebalanceFreq
 from alphapulse.trading.core.models import Signal, Stock
 from alphapulse.trading.screening.ranker import MultiFactorRanker
+from alphapulse.trading.strategy._factor_helper import _compute_factor_data
 from alphapulse.trading.strategy.base import BaseStrategy
 
 logger = logging.getLogger(__name__)
@@ -28,15 +29,22 @@ class ValueStrategy(BaseStrategy):
     strategy_id = "value"
     rebalance_freq = RebalanceFreq.WEEKLY
 
-    def __init__(self, ranker: MultiFactorRanker, config: dict) -> None:
+    def __init__(
+        self,
+        ranker: MultiFactorRanker,
+        config: dict,
+        factor_calc=None,
+    ) -> None:
         """ValueStrategy를 초기화한다.
 
         Args:
             ranker: 멀티팩터 랭커.
             config: 전략 설정. top_n(기본 15) 등.
+            factor_calc: (선택) FactorCalculator. 있으면 factor_data를 계산.
         """
         super().__init__(config=config)
         self.ranker = ranker
+        self.factor_calc = factor_calc
         self.top_n: int = config.get("top_n", 15)
         self.factor_weights: dict[str, float] = {
             "value": 0.4,
@@ -61,7 +69,10 @@ class ValueStrategy(BaseStrategy):
         """
         pulse_signal = market_context.get("pulse_signal", "neutral")
 
-        ranked = self.ranker.rank(universe, strategy_id=self.strategy_id)
+        factor_data = _compute_factor_data(self.factor_calc, universe)
+        ranked = self.ranker.rank(
+            universe, factor_data, strategy_id=self.strategy_id
+        )
         top_signals = ranked[: self.top_n]
 
         # 중립 시장 → 밸류 전략 강도 1.2배 (불확실성 시 가치주 선호)

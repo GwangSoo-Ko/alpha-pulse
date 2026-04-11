@@ -122,16 +122,31 @@ class BacktestEngine:
         )
 
         snapshots: list[PortfolioSnapshot] = []
+        last_rebalance: dict[str, str] = {}  # strategy_id → 마지막 리밸런싱 날짜
+
+        # 시장 컨텍스트 획득기 (data_feed에 있으면 사용, 없으면 빈 dict)
+        get_ctx = getattr(self.data_feed, "get_market_context", None)
 
         for date in trading_days:
             self.data_feed.advance_to(date)
 
+            # 시장 컨텍스트
+            market_context = {}
+            if callable(get_ctx):
+                try:
+                    market_context = get_ctx(date) or {}
+                except Exception:
+                    market_context = {}
+
             # 전략별 시그널 수집
             all_signals: list[Signal] = []
+            universe = self._get_universe()
             for strategy in self.strategies:
-                if strategy.should_rebalance("", date, {}):
-                    signals = strategy.generate_signals([], {})
+                last = last_rebalance.get(strategy.strategy_id, "00000000")
+                if strategy.should_rebalance(last, date, market_context):
+                    signals = strategy.generate_signals(universe, market_context)
                     all_signals.extend(signals)
+                    last_rebalance[strategy.strategy_id] = date
 
             # 현재 스냅샷 생성 (주문 전)
             snapshot = self._take_snapshot(date, snapshots)
@@ -162,6 +177,29 @@ class BacktestEngine:
             metrics=metrics,
             config=self.config,
         )
+
+    def _get_universe(self) -> list:
+        """현재 data_feed 기준 유니버스를 반환한다.
+
+        data_feed에 get_universe() 가 있으면 사용, 없으면 data_feed의
+        내부 종목 리스트, 모두 없으면 빈 리스트.
+        """
+        get_uni = getattr(self.data_feed, "get_universe", None)
+        if callable(get_uni):
+            try:
+                return get_uni()
+            except Exception:
+                pass
+        # HistoricalDataFeed가 _ohlcv_map 같은 내부 데이터를 가질 수 있음
+        get_codes = getattr(self.data_feed, "get_available_codes", None)
+        if callable(get_codes):
+            try:
+                codes = get_codes()
+                from alphapulse.trading.core.models import Stock
+                return [Stock(code=c, name=c, market="") for c in codes]
+            except Exception:
+                pass
+        return []
 
     def _take_snapshot(
         self, date: str, prev_snapshots: list[PortfolioSnapshot]

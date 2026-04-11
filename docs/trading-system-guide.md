@@ -397,7 +397,66 @@ ap trading screen --factor balanced --top 20
    ...
 ```
 
-### 4.2 모의투자 실행
+### 4.2 백테스트 실행
+
+실제 매매 전에 과거 데이터로 전략을 검증한다.
+
+```bash
+# 모멘텀 전략 3년 백테스트
+ap trading backtest --strategy momentum --start 20230101 --end 20260101
+
+# 자본금/시장/상위 N 지정
+ap trading backtest \
+    --strategy value \
+    --start 20240101 --end 20260101 \
+    --capital 100000000 \
+    --market KOSPI \
+    --top 20
+```
+
+출력 예시:
+
+```
+============================================================
+ 백테스트 시작
+============================================================
+ 전략:    momentum
+ 기간:    20230101 ~ 20260101
+ 자본금:  100,000,000원
+ 시장:    KOSPI
+ 상위 N:  20
+============================================================
+[1/4] 데이터 피드 로드...
+  -> 954종목
+[2/4] 전략 초기화...
+  -> momentum 로드
+[3/4] 엔진 실행...
+  -> 일별 스냅샷 741건
+[4/4] 성과 지표
+  누적수익률: +14.3%
+  연환산: +4.6%
+  샤프: 0.82
+  MDD: -9.4%
+```
+
+### 4.3 오늘의 시그널 확인 (실행 없이)
+
+매매를 실행하지 않고 현재 전략 시그널만 확인한다.
+
+```bash
+# 모멘텀 프리셋
+ap trading signals --strategy momentum --market KOSPI --top 20
+
+# 밸런스드 프리셋
+ap trading signals --strategy balanced --market KOSPI --top 30
+
+# 탑다운 ETF
+ap trading signals --strategy topdown_etf --top 5
+```
+
+프리셋 종류: `momentum`, `value`, `quality`, `growth`, `balanced`, `topdown_etf`.
+
+### 4.4 모의투자 실행
 
 한투 모의투자 서버로 전체 파이프라인을 1회 실행한다.
 
@@ -478,8 +537,14 @@ Trading System Status
 | `ap trading data update` | 증분 데이터 업데이트 | `ap trading data update` |
 | `ap trading data status` | 수집 현황 조회 | `ap trading data status` |
 | `ap trading screen` | 팩터 기반 종목 스크리닝 | `ap trading screen --market KOSPI --top 20 --factor momentum` |
+| `ap trading signals` | 전략별 시그널 프리셋 확인 | `ap trading signals --strategy balanced --top 20` |
+| `ap trading backtest` | 과거 데이터로 전략 검증 | `ap trading backtest --strategy momentum --start 20230101 --end 20260101` |
 | `ap trading run` | 매매 파이프라인 실행 | `ap trading run --mode paper --daemon` |
 | `ap trading status` | 시스템 상태 확인 | `ap trading status` |
+| `ap trading portfolio show` | 최신 포트폴리오 조회 | `ap trading portfolio show --mode paper` |
+| `ap trading portfolio history` | 성과 이력 | `ap trading portfolio history --days 30` |
+| `ap trading risk report` | 리스크 리포트 | `ap trading risk report --mode paper` |
+| `ap trading risk limits` | 리스크 한도 확인 | `ap trading risk limits` |
 | `ap trading reconcile` | DB/증권사 잔고 대사 | `ap trading reconcile` |
 
 ### 5.2 data 옵션
