@@ -394,16 +394,35 @@ def screen(market, top, factor):
             "momentum": calc.momentum(s.code),
             "value": calc.value(s.code),
             "quality": calc.quality(s.code),
+            "growth": calc.growth(s.code),
+            "profit_growth": calc.quality_profit_growth(s.code),
+            "debt_ratio": calc.quality_debt_ratio(s.code),
             "flow": calc.flow(s.code),
             "volatility": calc.volatility(s.code),
         }
 
     # 팩터별 가중치 프리셋
     weight_presets = {
-        "momentum": {"momentum": 0.6, "flow": 0.3, "volatility": 0.1},
-        "value": {"value": 0.4, "quality": 0.3, "momentum": 0.2, "flow": 0.1},
-        "quality": {"quality": 0.4, "momentum": 0.3, "value": 0.2, "flow": 0.1},
-        "balanced": {"momentum": 0.25, "value": 0.25, "quality": 0.2, "flow": 0.15, "volatility": 0.15},
+        "momentum": {
+            "momentum": 0.5, "flow": 0.3, "volatility": 0.2,
+        },
+        "value": {
+            "value": 0.4, "quality": 0.2, "debt_ratio": 0.1,
+            "momentum": 0.2, "flow": 0.1,
+        },
+        "quality": {
+            "quality": 0.35, "growth": 0.2, "debt_ratio": 0.1,
+            "momentum": 0.2, "value": 0.15,
+        },
+        "growth": {
+            "growth": 0.4, "profit_growth": 0.2, "momentum": 0.2,
+            "quality": 0.1, "flow": 0.1,
+        },
+        "balanced": {
+            "momentum": 0.20, "value": 0.20, "quality": 0.15,
+            "growth": 0.10, "profit_growth": 0.05, "debt_ratio": 0.05,
+            "flow": 0.15, "volatility": 0.10,
+        },
     }
     weights = weight_presets.get(factor, weight_presets["balanced"])
 

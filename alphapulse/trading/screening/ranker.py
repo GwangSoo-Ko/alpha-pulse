@@ -8,7 +8,14 @@ from datetime import datetime
 from alphapulse.trading.core.models import Signal, Stock
 
 # 높을수록 좋은 팩터 vs 낮을수록 좋은 팩터
-_INVERSE_FACTORS = {"volatility"}
+# 주의: factors.py의 일부 메서드는 이미 역수로 반환 (예: quality_debt_ratio)
+#       그런 경우 여기에 추가하지 않는다.
+# raw 부채비율, downside_vol을 직접 사용할 때만 inverse 처리.
+_INVERSE_FACTORS = {
+    "volatility",
+    "downside_vol",
+    "debt_ratio_raw",  # 명시적으로 raw 부채비율 (선택적)
+}
 
 
 class MultiFactorRanker:

@@ -247,6 +247,9 @@ class DataScheduler:
                         "momentum": momentum,
                         "value": value,
                         "quality": calc.quality(s.code),
+                        "growth": calc.growth(s.code),
+                        "profit_growth": calc.quality_profit_growth(s.code),
+                        "debt_ratio": calc.quality_debt_ratio(s.code),
                         "flow": calc.flow(s.code),
                         "volatility": calc.volatility(s.code),
                     }
@@ -254,9 +257,18 @@ class DataScheduler:
             if len(factor_data) < 10:
                 return self._fallback_by_market_cap(markets)
 
+            # 시계열 데이터 활용: 모멘텀+밸류+퀄리티+성장성+수급+변동성 균형
             ranker = MultiFactorRanker(
-                weights={"momentum": 0.25, "value": 0.25, "quality": 0.2,
-                         "flow": 0.15, "volatility": 0.15}
+                weights={
+                    "momentum":      0.20,
+                    "value":         0.20,
+                    "quality":       0.15,
+                    "growth":        0.10,
+                    "profit_growth": 0.05,
+                    "debt_ratio":    0.05,
+                    "flow":          0.15,
+                    "volatility":    0.10,
+                }
             )
             signals = ranker.rank(
                 [s for s in all_stocks if s.code in factor_data],

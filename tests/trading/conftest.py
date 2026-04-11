@@ -63,4 +63,54 @@ def trading_store(tmp_path):
     ]
     store.save_short_interest_bulk(samsung_short + hynix_short)
 
+    # 재무 시계열 (시계열 팩터 테스트용)
+    # 삼성: 분기마다 매출/이익 성장
+    # SK: 매출은 비슷, 이익 감소
+    # 형식: (code, period, period_type, is_estimate,
+    #        revenue, operating_profit, net_income,
+    #        operating_margin, net_margin,
+    #        roe, debt_ratio, quick_ratio, reserve_ratio,
+    #        eps, per, bps, pbr, dps, div_yield, div_payout)
+    samsung_ts = [
+        ("005930", "2024.06", "quarterly", 0,
+         700000.0, 50000.0, 40000.0, 7.14, 5.71, 8.5, 28.0, None, None,
+         700.0, 12.0, 50000.0, 1.2, None, None, None),
+        ("005930", "2024.09", "quarterly", 0,
+         750000.0, 60000.0, 50000.0, 8.0, 6.67, 9.0, 28.5, None, None,
+         800.0, 12.5, 51000.0, 1.25, None, None, None),
+        ("005930", "2024.12", "quarterly", 0,
+         800000.0, 70000.0, 60000.0, 8.75, 7.5, 9.5, 29.0, None, None,
+         900.0, 13.0, 52000.0, 1.3, None, None, None),
+        ("005930", "2025.03", "quarterly", 0,
+         850000.0, 80000.0, 70000.0, 9.41, 8.24, 10.0, 29.5, None, None,
+         1000.0, 13.5, 53000.0, 1.35, None, None, None),
+        ("005930", "2025.06", "quarterly", 0,
+         900000.0, 90000.0, 80000.0, 10.0, 8.89, 10.5, 30.0, None, None,
+         1100.0, 14.0, 54000.0, 1.4, None, None, None),
+        ("005930", "2024.12", "annual", 0,
+         3000000.0, 250000.0, 200000.0, 8.33, 6.67, 9.5, 29.0, None, None,
+         3000.0, 13.0, 52000.0, 1.3, None, None, None),
+    ]
+    hynix_ts = [
+        ("000660", "2024.06", "quarterly", 0,
+         200000.0, 50000.0, 40000.0, 25.0, 20.0, 12.0, 35.0, None, None,
+         500.0, 8.0, 60000.0, 1.0, None, None, None),
+        ("000660", "2024.09", "quarterly", 0,
+         200000.0, 45000.0, 35000.0, 22.5, 17.5, 11.5, 35.0, None, None,
+         470.0, 8.5, 60500.0, 1.05, None, None, None),
+        ("000660", "2024.12", "quarterly", 0,
+         200000.0, 40000.0, 30000.0, 20.0, 15.0, 11.0, 35.0, None, None,
+         440.0, 9.0, 61000.0, 1.1, None, None, None),
+        ("000660", "2025.03", "quarterly", 0,
+         200000.0, 35000.0, 25000.0, 17.5, 12.5, 10.5, 35.0, None, None,
+         410.0, 9.5, 61500.0, 1.15, None, None, None),
+        ("000660", "2025.06", "quarterly", 0,
+         200000.0, 30000.0, 20000.0, 15.0, 10.0, 10.0, 35.0, None, None,
+         380.0, 10.0, 62000.0, 1.2, None, None, None),
+        ("000660", "2024.12", "annual", 0,
+         800000.0, 175000.0, 130000.0, 21.88, 16.25, 11.5, 35.0, None, None,
+         1820.0, 8.5, 60500.0, 1.05, None, None, None),
+    ]
+    store.save_fundamentals_timeseries_bulk(samsung_ts + hynix_ts)
+
     return store

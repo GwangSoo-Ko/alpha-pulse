@@ -2,7 +2,6 @@
 
 from alphapulse.trading.screening.factors import FactorCalculator
 
-
 # ── 모멘텀 팩터 ──────────────────────────────────────────────────
 
 class TestMomentum:
@@ -175,3 +174,94 @@ class TestShortDecrease:
         """데이터 없으면 None."""
         calc = FactorCalculator(trading_store)
         assert calc.short_decrease("999999") is None
+
+
+# ── 시계열 기반 신규 팩터 ────────────────────────────────────────
+
+class TestQualityRoeTtm:
+    """TTM ROE 팩터 테스트."""
+
+    def test_returns_average(self, trading_store):
+        """최근 4분기 ROE 평균을 반환한다."""
+        calc = FactorCalculator(trading_store)
+        # 삼성: 9.0, 9.5, 10.0, 10.5 → 평균 9.75
+        result = calc.quality_roe_ttm("005930")
+        assert result is not None
+        assert abs(result - 9.75) < 0.01
+
+    def test_missing_data(self, trading_store):
+        """데이터 없으면 None."""
+        calc = FactorCalculator(trading_store)
+        assert calc.quality_roe_ttm("999999") is None
+
+
+class TestQualityRevenueGrowth:
+    """매출액 YoY 성장률 테스트."""
+
+    def test_growing(self, trading_store):
+        """삼성: 700K → 900K (4분기 후) → +28.57%."""
+        calc = FactorCalculator(trading_store)
+        result = calc.quality_revenue_growth("005930")
+        assert result is not None
+        assert result > 28 and result < 29
+
+    def test_flat(self, trading_store):
+        """SK: 200K 유지 → 0%."""
+        calc = FactorCalculator(trading_store)
+        result = calc.quality_revenue_growth("000660")
+        assert result == 0.0
+
+
+class TestQualityProfitGrowth:
+    """영업이익 YoY 성장률 테스트."""
+
+    def test_growing(self, trading_store):
+        """삼성: 50K → 90K → +80%."""
+        calc = FactorCalculator(trading_store)
+        result = calc.quality_profit_growth("005930")
+        assert result is not None
+        assert abs(result - 80.0) < 0.01
+
+    def test_declining(self, trading_store):
+        """SK: 50K → 30K → -40%."""
+        calc = FactorCalculator(trading_store)
+        result = calc.quality_profit_growth("000660")
+        assert result is not None
+        assert result < 0
+
+
+class TestQualityNetIncomeGrowth:
+    """순이익 YoY 성장률 테스트."""
+
+    def test_growing(self, trading_store):
+        """삼성: 40K → 80K → +100%."""
+        calc = FactorCalculator(trading_store)
+        result = calc.quality_net_income_growth("005930")
+        assert result is not None
+        assert abs(result - 100.0) < 0.01
+
+
+class TestEarningsSurprise:
+    """어닝 서프라이즈 (직전 분기 대비) 테스트."""
+
+    def test_positive(self, trading_store):
+        """삼성: 80K → 90K → +12.5%."""
+        calc = FactorCalculator(trading_store)
+        result = calc.earnings_surprise("005930")
+        assert result is not None
+        assert result > 0
+
+    def test_negative(self, trading_store):
+        """SK: 35K → 30K → 음수."""
+        calc = FactorCalculator(trading_store)
+        result = calc.earnings_surprise("000660")
+        assert result is not None
+        assert result < 0
+
+
+class TestGrowthAlias:
+    """편의 메서드 growth()."""
+
+    def test_calls_revenue_growth(self, trading_store):
+        calc = FactorCalculator(trading_store)
+        assert calc.growth("005930") == calc.quality_revenue_growth("005930")
