@@ -169,10 +169,14 @@ class BacktestMetrics:
     ) -> dict:
         """거래 분석 지표를 계산한다.
 
-        매수-매도 쌍으로 라운드트립을 구성하여 승패를 판단한다.
+        전체 체결 건수와 매수-매도 라운드트립을 모두 추적한다.
         """
         if not trades:
             return {
+                "total_orders": 0,
+                "filled_buys": 0,
+                "filled_sells": 0,
+                "round_trips": 0,
                 "total_trades": 0,
                 "win_rate": 0.0,
                 "profit_factor": 0.0,
@@ -185,6 +189,8 @@ class BacktestMetrics:
         buys: dict[str, list[OrderResult]] = {}
         round_trips: list[float] = []
         total_traded_amount = 0.0
+        filled_buys = 0
+        filled_sells = 0
 
         for trade in trades:
             if trade.status != "filled":
@@ -194,7 +200,9 @@ class BacktestMetrics:
 
             if trade.order.side == "BUY":
                 buys.setdefault(code, []).append(trade)
+                filled_buys += 1
             else:  # SELL
+                filled_sells += 1
                 if code in buys and buys[code]:
                     buy_trade = buys[code].pop(0)
                     pnl = (
@@ -203,21 +211,13 @@ class BacktestMetrics:
                     pnl -= trade.commission + trade.tax + buy_trade.commission
                     round_trips.append(pnl)
 
-        total_trades = len(round_trips)
-        if total_trades == 0:
-            return {
-                "total_trades": 0,
-                "win_rate": 0.0,
-                "profit_factor": 0.0,
-                "avg_win": 0.0,
-                "avg_loss": 0.0,
-                "turnover": 0.0,
-            }
+        total_orders = filled_buys + filled_sells
+        n_round_trips = len(round_trips)
 
         wins = [pnl for pnl in round_trips if pnl > 0]
         losses = [pnl for pnl in round_trips if pnl <= 0]
 
-        win_rate = len(wins) / total_trades * 100
+        win_rate = len(wins) / n_round_trips * 100 if n_round_trips > 0 else 0.0
         total_profit = sum(wins) if wins else 0.0
         total_loss = abs(sum(losses)) if losses else 0.0
         profit_factor = total_profit / total_loss if total_loss > 0 else 0.0
@@ -228,7 +228,11 @@ class BacktestMetrics:
         turnover = total_traded_amount / initial_capital if initial_capital > 0 else 0.0
 
         return {
-            "total_trades": total_trades,
+            "total_orders": total_orders,
+            "filled_buys": filled_buys,
+            "filled_sells": filled_sells,
+            "round_trips": n_round_trips,
+            "total_trades": total_orders,
             "win_rate": round(win_rate, 2),
             "profit_factor": round(profit_factor, 4),
             "avg_win": round(avg_win, 2),
@@ -318,6 +322,10 @@ class BacktestMetrics:
             "sharpe_ratio": 0.0,
             "sortino_ratio": 0.0,
             "calmar_ratio": 0.0,
+            "total_orders": 0,
+            "filled_buys": 0,
+            "filled_sells": 0,
+            "round_trips": 0,
             "total_trades": 0,
             "win_rate": 0.0,
             "profit_factor": 0.0,

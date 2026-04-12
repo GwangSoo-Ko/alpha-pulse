@@ -184,12 +184,14 @@ class TestTradeMetrics:
         assert result["profit_factor"] > 1.0
 
     def test_total_trades(self, metrics, sample_snapshots, benchmark_returns, sample_trades):
-        """총 거래 횟수가 올바르다."""
+        """총 체결 건수와 라운드트립이 올바르다."""
         result = metrics.calculate(
             sample_snapshots, benchmark_returns, trades=sample_trades,
         )
-        # 매수+매도 쌍 = 5 라운드트립
-        assert result["total_trades"] == 5
+        # 매수 5 + 매도 5 = 10건 체결, 5 라운드트립
+        assert result["total_orders"] == 10
+        assert result["round_trips"] == 5
+        assert result["total_trades"] == 10  # total_orders와 동일
 
 
 class TestBenchmarkMetrics:

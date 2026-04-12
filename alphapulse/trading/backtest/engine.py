@@ -237,19 +237,38 @@ class BacktestEngine:
         )
 
     def _get_benchmark_returns(self, trading_days: list[str]) -> np.ndarray:
-        """벤치마크 일간 수익률 배열을 생성한다."""
-        prices = []
+        """벤치마크 일간 수익률 배열을 생성한다.
+
+        벤치마크 코드로 데이터를 찾지 못하면 KODEX 200(069500)으로 폴백한다.
+        """
+        benchmark_codes = [self.config.benchmark]
+        # "KOSPI" 같은 지수 코드는 종목 데이터에 없을 수 있으므로 프록시 추가
+        if self.config.benchmark.upper() in ("KOSPI", "1001"):
+            benchmark_codes = ["069500", self.config.benchmark]
+        elif self.config.benchmark.upper() in ("KOSDAQ", "2001"):
+            benchmark_codes = ["229200", self.config.benchmark]  # KODEX KOSDAQ150
+
+        prices: list[float] = []
+
         for date in trading_days:
             self.data_feed.advance_to(date)
-            bar = self.data_feed.get_bar(self.config.benchmark)
-            if bar:
+            bar = None
+            for code in benchmark_codes:
+                bar = self.data_feed.get_bar(code)
+                if bar and bar.close > 0:
+                    break
+            if bar and bar.close > 0:
                 prices.append(bar.close)
-            else:
-                prices.append(prices[-1] if prices else 0)
+            elif prices:
+                prices.append(prices[-1])
+            # 첫 날부터 데이터 없으면 스킵 (0 추가 안 함)
 
         if len(prices) < 2:
             return np.array([0.0])
 
         prices_arr = np.array(prices, dtype=float)
-        returns = np.diff(prices_arr) / prices_arr[:-1]
+        # 0으로 나누기 방지
+        mask = prices_arr[:-1] > 0
+        returns = np.zeros(len(prices_arr) - 1)
+        returns[mask] = np.diff(prices_arr)[mask] / prices_arr[:-1][mask]
         return returns

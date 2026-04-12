@@ -1030,8 +1030,13 @@ def backtest(strategy, start, end, capital, market, top):
     click.echo(f" 소르티노 비율:    {m.get('sortino_ratio', 0):+.2f}")
     click.echo(f" 최대 낙폭 (MDD):  {m.get('max_drawdown', 0):.2f}%")
     click.echo(f" 변동성 (연환산):  {m.get('volatility', 0):.2f}%")
-    click.echo(f" 승률:             {m.get('win_rate', 0) * 100:.1f}%")
-    click.echo(f" 총 거래 수:       {m.get('total_trades', 0)}")
+    click.echo(f" 총 주문 체결:     {m.get('total_orders', m.get('total_trades', 0))}건"
+               f" (매수 {m.get('filled_buys', 0)} / 매도 {m.get('filled_sells', 0)})")
+    rt = m.get('round_trips', 0)
+    click.echo(f" 라운드트립:       {rt}건"
+               f" (승률 {m.get('win_rate', 0):.1f}%)" if rt > 0
+               else f" 라운드트립:       {rt}건 (미청산 포지션)")
+    click.echo(f" 턴오버:           {m.get('turnover', 0):.2f}x")
     click.echo(f" 스냅샷 수:        {len(result.snapshots)}")
     click.echo(f"{'='*60}")
 
