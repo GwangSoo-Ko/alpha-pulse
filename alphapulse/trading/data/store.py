@@ -394,15 +394,30 @@ class TradingStore:
                 rows,
             )
 
-    def get_investor_flow(self, code: str, days: int = 20) -> list[dict]:
-        """종목별 수급 데이터를 조회한다."""
+    def get_investor_flow(
+        self, code: str, days: int = 20, end_date: str = ""
+    ) -> list[dict]:
+        """종목별 수급 데이터를 조회한다.
+
+        Args:
+            code: 종목코드.
+            days: 최근 N일.
+            end_date: 종료일 (YYYYMMDD). 비어있으면 전체.
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM stock_investor_flow "
-                "WHERE code = ? ORDER BY date DESC LIMIT ?",
-                (code, days),
-            ).fetchall()
+            if end_date:
+                rows = conn.execute(
+                    "SELECT * FROM stock_investor_flow "
+                    "WHERE code = ? AND date <= ? ORDER BY date DESC LIMIT ?",
+                    (code, end_date, days),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM stock_investor_flow "
+                    "WHERE code = ? ORDER BY date DESC LIMIT ?",
+                    (code, days),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     # ── Short Interest ─────────────────────────────────────────────
@@ -425,15 +440,30 @@ class TradingStore:
                 rows,
             )
 
-    def get_short_interest(self, code: str, days: int = 20) -> list[dict]:
-        """공매도/신용 데이터를 조회한다."""
+    def get_short_interest(
+        self, code: str, days: int = 20, end_date: str = ""
+    ) -> list[dict]:
+        """공매도/신용 데이터를 조회한다.
+
+        Args:
+            code: 종목코드.
+            days: 최근 N일.
+            end_date: 종료일 (YYYYMMDD). 비어있으면 전체.
+        """
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM short_interest "
-                "WHERE code = ? ORDER BY date DESC LIMIT ?",
-                (code, days),
-            ).fetchall()
+            if end_date:
+                rows = conn.execute(
+                    "SELECT * FROM short_interest "
+                    "WHERE code = ? AND date <= ? ORDER BY date DESC LIMIT ?",
+                    (code, end_date, days),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM short_interest "
+                    "WHERE code = ? ORDER BY date DESC LIMIT ?",
+                    (code, days),
+                ).fetchall()
         return [dict(r) for r in rows]
 
     # ── Wisereport ─────────────────────────────────────────────────

@@ -130,6 +130,12 @@ class BacktestEngine:
         for date in trading_days:
             self.data_feed.advance_to(date)
 
+            # 전략의 factor_calc에도 시뮬레이션 날짜 전달
+            for strategy in self.strategies:
+                fc = getattr(strategy, "factor_calc", None)
+                if fc is not None and hasattr(fc, "advance_to"):
+                    fc.advance_to(date)
+
             # 시장 컨텍스트
             market_context = {}
             if callable(get_ctx):

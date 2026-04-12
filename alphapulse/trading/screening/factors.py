@@ -34,8 +34,21 @@ class FactorCalculator:
         store: TradingStore 인스턴스.
     """
 
-    def __init__(self, store: TradingStore) -> None:
+    def __init__(self, store: TradingStore, current_date: str = "") -> None:
         self.store = store
+        self.current_date: str = current_date
+
+    def advance_to(self, date: str) -> None:
+        """백테스트 시뮬레이션 날짜를 전진시킨다.
+
+        이후 팩터 계산 시 이 날짜 이후 데이터를 사용하지 않는다.
+        """
+        self.current_date = date
+
+    @property
+    def _end_date(self) -> str:
+        """OHLCV/수급/공매도 쿼리의 종료일. 설정 안 했으면 전체 조회."""
+        return self.current_date or "99999999"
 
     # ── 시계열 헬퍼 ──────────────────────────────────────────────
 
@@ -108,7 +121,7 @@ class FactorCalculator:
 
         전통적인 12-1 모멘텀 팩터.
         """
-        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        rows = self.store.get_ohlcv(code, "00000000", self._end_date)
         if len(rows) < 22:  # 최소 22일 (1개월 제외 + 1일)
             return None
         # 최근 20일(1개월) 제외한 나머지에서 계산
@@ -126,7 +139,7 @@ class FactorCalculator:
 
         현재가 / 52주 고가 * 100. 100에 가까울수록 신고가 근접.
         """
-        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        rows = self.store.get_ohlcv(code, "00000000", self._end_date)
         if len(rows) < 2:
             return None
         recent_252 = rows[-252:] if len(rows) >= 252 else rows
@@ -164,7 +177,7 @@ class FactorCalculator:
         if revenue is None or revenue <= 0:
             return None
         # 시가총액은 최근 OHLCV에서 가져옴
-        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        rows = self.store.get_ohlcv(code, "00000000", self._end_date)
         if not rows:
             return None
         mcap = rows[-1].get("market_cap", 0)
@@ -314,14 +327,18 @@ class FactorCalculator:
 
     def flow_foreign(self, code: str, days: int = 20) -> float | None:
         """외국인 N일 순매수 누적 (원)."""
-        rows = self.store.get_investor_flow(code, days=days)
+        rows = self.store.get_investor_flow(
+            code, days=days, end_date=self._end_date,
+        )
         if not rows:
             return None
         return sum(r.get("foreign_net", 0) or 0 for r in rows)
 
     def flow_institutional(self, code: str, days: int = 20) -> float | None:
         """기관 N일 순매수 누적 (원)."""
-        rows = self.store.get_investor_flow(code, days=days)
+        rows = self.store.get_investor_flow(
+            code, days=days, end_date=self._end_date,
+        )
         if not rows:
             return None
         return sum(r.get("institutional_net", 0) or 0 for r in rows)
@@ -331,7 +348,9 @@ class FactorCalculator:
 
         양수면 단기 수급 개선, 음수면 단기 수급 악화.
         """
-        rows = self.store.get_investor_flow(code, days=20)
+        rows = self.store.get_investor_flow(
+            code, days=20, end_date=self._end_date,
+        )
         if len(rows) < 5:
             return None
         foreign = [r.get("foreign_net", 0) or 0 for r in rows]
@@ -348,7 +367,9 @@ class FactorCalculator:
 
         양수면 공매도 감소(긍정적), 음수면 증가(부정적).
         """
-        rows = self.store.get_short_interest(code, days=days)
+        rows = self.store.get_short_interest(
+            code, days=days, end_date=self._end_date,
+        )
         if len(rows) < 2:
             return None
         # rows는 최신순(DESC), 첫 번째가 최근
@@ -364,7 +385,9 @@ class FactorCalculator:
 
         양수면 신용 증가(과열 신호), 음수면 감소.
         """
-        rows = self.store.get_short_interest(code, days=days)
+        rows = self.store.get_short_interest(
+            code, days=days, end_date=self._end_date,
+        )
         if len(rows) < 2:
             return None
         recent = rows[0].get("credit_balance", 0) or 0
@@ -455,7 +478,7 @@ class FactorCalculator:
 
     def _momentum_by_days(self, code: str, lookback: int) -> float | None:
         """lookback 기간 수익률 (%)."""
-        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        rows = self.store.get_ohlcv(code, "00000000", self._end_date)
         if len(rows) < 2:
             return None
         recent = rows[-lookback:] if len(rows) >= lookback else rows
@@ -467,7 +490,7 @@ class FactorCalculator:
 
     def _get_daily_returns(self, code: str, days: int) -> list[float] | None:
         """일간 수익률 리스트를 반환한다."""
-        rows = self.store.get_ohlcv(code, "00000000", "99999999")
+        rows = self.store.get_ohlcv(code, "00000000", self._end_date)
         if len(rows) < 5:
             return None
         recent = rows[-days:] if len(rows) >= days else rows
