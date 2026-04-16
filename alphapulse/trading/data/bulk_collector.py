@@ -248,6 +248,9 @@ class BulkCollector:
     ) -> list[CollectionResult]:
         """마지막 수집일 이후 신규 데이터만 수집한다.
 
+        `collect_all`과 동일하게 단계별 ProgressTracker로 진행률을 출력한다.
+        이미 최신인 종목은 자동 skip한다.
+
         Args:
             markets: 대상 시장 목록.
 
@@ -260,56 +263,123 @@ class BulkCollector:
         today = self._find_latest_trading_date()
         results = []
 
+        import sys
+
         for market in markets:
             last = self.metadata.get_last_date(market, "ohlcv")
             if last is None:
-                logger.info("%s: 미수집 상태. collect_all 실행.", market)
+                sys.stderr.write(
+                    f"\n{market}: 미수집 상태. collect_all 실행.\n"
+                )
                 results.extend(self.collect_all(markets=[market]))
                 continue
 
-            # 다음 거래일 계산 (간단히 +1일)
             last_dt = datetime.strptime(last, "%Y%m%d")
             start = (last_dt + timedelta(days=1)).strftime("%Y%m%d")
 
             if start > today:
-                logger.info("%s: 이미 최신 (%s).", market, last)
+                sys.stderr.write(f"\n{market}: 이미 최신 ({last}).\n")
                 continue
 
-            logger.info("%s 증분 업데이트: %s ~ %s", market, start, today)
+            sys.stderr.write(
+                f"\n{'='*60}\n"
+                f"  {market} 증분 업데이트 ({start} ~ {today})\n"
+                f"{'='*60}\n"
+            )
             t0 = _time.time()
 
+            sys.stderr.write("\n  [1/5] 종목 목록 로드 중...\n")
             codes = self._collect_stock_list(market)
             if not codes:
+                sys.stderr.write(f"  -> {market} 종목 목록이 비어 있습니다.\n")
                 continue
+            sys.stderr.write(f"  -> {len(codes)}종목\n")
 
             result = CollectionResult(market=market)
 
-            # OHLCV 증분
+            # [2/5] OHLCV 증분 (이미 최신 종목 skip)
+            ohlcv_tracker = ProgressTracker(
+                total=len(codes),
+                label=f"[2/5] {market} OHLCV",
+                checkpoint_dir=self.db_path.parent,
+            )
+            ohlcv_tracker.start()
+            ohlcv_up_to_date = self._get_ohlcv_up_to_date_codes(codes, today)
             for code in codes:
-                self.rate_limiter.call_safe(
+                if code in ohlcv_up_to_date:
+                    ohlcv_tracker.advance(skipped=True)
+                    ohlcv_tracker.print_progress(code)
+                    continue
+                ok = self.rate_limiter.call_safe(
                     self.stock_collector.collect_ohlcv, code, start, today
                 )
-            result.ohlcv_count = len(codes)
+                ohlcv_tracker.advance(skipped=(ok is None))
+                ohlcv_tracker.print_progress(code)
+            ohlcv_tracker.print_summary()
+            s = ohlcv_tracker.summary()
+            result.ohlcv_count = s["completed"] - s["skipped"]
+            result.skipped = s["skipped"]
 
-            # 재무제표
-            self.rate_limiter.call_safe(
-                self.fundamental_collector.collect, today, market=market
+            # [3/5] 재무제표 (병렬 + 진행률)
+            fund_tracker = ProgressTracker(
+                total=len(codes),
+                label=f"[3/5] {market} 재무제표",
+                checkpoint_dir=self.db_path.parent,
             )
+            fund_tracker.start()
+
+            def _fund_progress(code: str) -> None:
+                fund_tracker.advance()
+                fund_tracker.print_progress(code)
+
+            try:
+                self.fundamental_collector.collect(
+                    today, market=market, max_workers=5,
+                    progress_callback=_fund_progress,
+                )
+                fund_tracker.print_summary()
+            except Exception as e:
+                logger.warning("재무제표 수집 실패: %s", e)
             result.fundamentals_count = len(codes)
 
-            # 수급 증분
-            for code in codes:
-                self.rate_limiter.call_safe(
-                    self.flow_collector.collect, code, start, today
-                )
-            result.flow_count = len(codes)
+            # [4/5] 수급 (병렬, 최신 skip)
+            flow_tracker = ProgressTracker(
+                total=len(codes),
+                label=f"[4/5] {market} 수급",
+                checkpoint_dir=self.db_path.parent,
+            )
+            flow_tracker.start()
+            flow_up_to_date = self._get_flow_up_to_date_codes(codes, today)
+            needs_collect = [c for c in codes if c not in flow_up_to_date]
+            for _ in flow_up_to_date:
+                flow_tracker.advance(skipped=True)
+            if flow_up_to_date:
+                flow_tracker.print_progress("")
 
-            # wisereport 정적 데이터
+            self._collect_flow_parallel(
+                needs_collect, start, today, flow_tracker, max_workers=5,
+            )
+            flow_tracker.print_summary()
+            result.flow_count = flow_tracker.summary()["completed"]
+
+            # [5/5] wisereport 정적 데이터 (병렬)
+            ws_tracker = ProgressTracker(
+                total=len(codes),
+                label=f"[5/5] {market} wisereport",
+                checkpoint_dir=self.db_path.parent,
+            )
+            ws_tracker.start()
+
+            def _ws_progress(code: str) -> None:
+                ws_tracker.advance()
+                ws_tracker.print_progress(code)
+
             try:
                 ws_results = self.wisereport_collector.collect_static_batch(
-                    codes, today
+                    codes, today, max_workers=5, progress_callback=_ws_progress,
                 )
                 result.wisereport_count = len(ws_results)
+                ws_tracker.print_summary()
             except Exception as e:
                 logger.warning("wisereport 증분 수집 실패 (무시): %s", e)
 
@@ -322,6 +392,12 @@ class BulkCollector:
 
             result.elapsed_seconds = _time.time() - t0
             results.append(result)
+            sys.stderr.write(
+                f"\n  === {market} 완료: OHLCV {result.ohlcv_count}, "
+                f"재무 {result.fundamentals_count}, 수급 {result.flow_count}, "
+                f"wisereport {result.wisereport_count} "
+                f"({result.elapsed_seconds:.0f}초) ===\n"
+            )
 
         return results
 

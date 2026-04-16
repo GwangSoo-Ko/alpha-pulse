@@ -504,16 +504,26 @@ def data_update(market):
     collector = BulkCollector(db_path=cfg.DATA_DIR / "trading.db")
     markets = ["KOSPI", "KOSDAQ"] if market == "ALL" else [market]
 
+    click.echo(f"증분 업데이트 시작: {', '.join(markets)}")
+    click.echo()
+
     results = collector.update(markets=markets)
 
+    click.echo(f"\n{'=' * 50}")
+    click.echo(" 업데이트 완료")
+    click.echo(f"{'=' * 50}")
     if not results:
-        click.echo("이미 최신 상태입니다.")
+        click.echo(" 이미 최신 상태입니다.")
     else:
         for r in results:
             click.echo(
-                f"{r.market}: {r.ohlcv_count}종목 업데이트 "
+                f" {r.market}: OHLCV {r.ohlcv_count}종목, "
+                f"재무 {r.fundamentals_count}, 수급 {r.flow_count}, "
+                f"wisereport {r.wisereport_count} "
                 f"({r.elapsed_seconds:.0f}초)"
             )
+            if r.skipped:
+                click.echo(f"   (이미 최신: {r.skipped}종목)")
 
 
 @data.command("status")
