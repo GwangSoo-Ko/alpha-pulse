@@ -14,10 +14,10 @@ AI 기반 투자 인텔리전스 플랫폼. 정량(Market Pulse) + 정성(Conten
   - `core/` — 데이터 모델, Protocol 인터페이스, 캘린더, 비용 모델, 감사 추적.
   - `data/` — 종목 데이터 수집 (OHLCV, 재무, 수급, 공매도). **Sync**.
   - `screening/` — 20개 팩터, 필터, 멀티팩터 랭킹. **Sync**.
-  - `strategy/` — 4개 전략 + AI 종합 판단. **Sync** (AI만 Async).
+  - `strategy/` — 4개 전략(momentum/value/quality_momentum/topdown_etf) + AI 종합 판단. **Sync** (AI만 Async).
   - `portfolio/` — 포트폴리오 최적화, 리밸런싱. **Sync**.
   - `risk/` — VaR, 드로다운, 스트레스 테스트. **Sync**.
-  - `backtest/` — 백테스트 엔진, SimBroker. **Sync**.
+  - `backtest/` — 백테스트 엔진, SimBroker, 결과 저장/리포트. **Sync**.
   - `broker/` — 한투 API (KISBroker/PaperBroker). **Sync** (requests).
   - `orchestrator/` — 5-phase 파이프라인, 스케줄러. **Async** (CLI entry만 asyncio.run).
 
@@ -43,9 +43,9 @@ AI 기반 투자 인텔리전스 플랫폼. 정량(Market Pulse) + 정성(Conten
 ## Testing
 
 ```bash
-pytest tests/ -v                     # 전체 (739개)
+pytest tests/ -v                     # 전체 (843개)
 pytest tests/{market,content,briefing,agents,feedback}/ -v  # 기존 모듈별
-pytest tests/trading/ -v             # 자동 매매 시스템 (464개)
+pytest tests/trading/ -v             # 자동 매매 시스템 (471개)
 pytest tests/ --cov=alphapulse       # 커버리지
 ```
 
