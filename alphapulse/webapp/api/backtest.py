@@ -148,3 +148,72 @@ async def delete_run(
         raise HTTPException(status_code=404, detail="Run not found")
     reader.delete_run(s.run_id)
     return {"ok": True}
+
+
+# ==== Task 15 additions ====
+
+import uuid  # noqa: E402
+from typing import Literal  # noqa: E402
+
+from fastapi import BackgroundTasks  # noqa: E402
+from pydantic import Field  # noqa: E402
+
+from alphapulse.webapp.api.backtest_runner import run_backtest_sync  # noqa: E402
+from alphapulse.webapp.jobs.runner import JobRunner  # noqa: E402
+from alphapulse.webapp.store.jobs import JobRepository  # noqa: E402
+
+
+class RunBacktestRequest(BaseModel):
+    strategy: Literal[
+        "momentum", "value", "quality_momentum", "topdown_etf",
+    ]
+    start: str | None = Field(default=None, pattern=r"^(\d{8})?$")
+    end: str | None = Field(default=None, pattern=r"^(\d{8})?$")
+    capital: int = Field(default=100_000_000, ge=1_000_000, le=100_000_000_000)
+    market: str = Field(default="KOSPI")
+    top: int = Field(default=20, ge=1, le=100)
+    name: str = Field(default="", max_length=100)
+
+
+class RunBacktestResponse(BaseModel):
+    job_id: str
+
+
+def get_job_repo(request: Request) -> JobRepository:
+    return request.app.state.jobs
+
+
+def get_job_runner(request: Request) -> JobRunner:
+    return request.app.state.job_runner
+
+
+@router.post("/run", response_model=RunBacktestResponse)
+async def run_backtest(
+    body: RunBacktestRequest,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    job_repo: JobRepository = Depends(get_job_repo),
+    job_runner: JobRunner = Depends(get_job_runner),
+):
+    job_id = str(uuid.uuid4())
+    job_repo.create(
+        job_id=job_id, kind="backtest",
+        params=body.model_dump(),
+        user_id=user.id,
+    )
+
+    async def _run() -> None:
+        await job_runner.run(
+            job_id,
+            run_backtest_sync,
+            strategy=body.strategy,
+            start=body.start or "",
+            end=body.end or "",
+            capital=body.capital,
+            market=body.market,
+            top=body.top,
+            name=body.name,
+        )
+
+    background_tasks.add_task(_run)
+    return RunBacktestResponse(job_id=job_id)
