@@ -1071,9 +1071,25 @@ def backtest_run(strategy, start, end, capital, market, top, name, no_save,
         order_generator=order_gen,
     )
 
+    import sys
+
+    def _bt_progress(current: int, total: int, date: str) -> None:
+        if total == 0:
+            return
+        pct = current / total * 100
+        filled = int(25 * current / total)
+        bar = "█" * filled + "░" * (25 - filled)
+        sys.stderr.write(
+            f"\r  [{bar}] {pct:5.1f}%  {current}/{total}  {date}"
+            f"{'':10}"
+        )
+        sys.stderr.flush()
+
     try:
-        result = engine.run()
+        result = engine.run(progress_callback=_bt_progress)
+        sys.stderr.write("\n")
     except Exception as e:
+        sys.stderr.write("\n")
         click.echo(f"\n  ERROR: 백테스트 실패 - {e}")
         import traceback
         traceback.print_exc()

@@ -104,7 +104,10 @@ class BacktestEngine:
         self._calendar = KRXCalendar()
         self._metrics_calc = BacktestMetrics()
 
-    def run(self) -> BacktestResult:
+    def run(
+        self,
+        progress_callback: Callable[[int, int, str], None] | None = None,
+    ) -> BacktestResult:
         """백테스트를 실행한다.
 
         거래일을 순회하며:
@@ -112,6 +115,9 @@ class BacktestEngine:
         2. 전략별 시그널 생성.
         3. 주문 생성 → SimBroker 체결.
         4. 일별 스냅샷 저장.
+
+        Args:
+            progress_callback: (current, total, date) 진행률 콜백 (선택).
 
         Returns:
             BacktestResult (스냅샷, 체결 이력, 성과 지표).
@@ -121,13 +127,16 @@ class BacktestEngine:
             self.config.end_date,
         )
 
+        total_days = len(trading_days)
         snapshots: list[PortfolioSnapshot] = []
         last_rebalance: dict[str, str] = {}  # strategy_id → 마지막 리밸런싱 날짜
 
         # 시장 컨텍스트 획득기 (data_feed에 있으면 사용, 없으면 빈 dict)
         get_ctx = getattr(self.data_feed, "get_market_context", None)
 
-        for date in trading_days:
+        for idx, date in enumerate(trading_days):
+            if progress_callback is not None:
+                progress_callback(idx, total_days, date)
             self.data_feed.advance_to(date)
 
             # 전략의 factor_calc에도 시뮬레이션 날짜 전달
