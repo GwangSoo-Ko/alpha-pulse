@@ -43,7 +43,7 @@ AI 기반 투자 인텔리전스 플랫폼. 정량(Market Pulse) + 정성(Conten
 ## Testing
 
 ```bash
-pytest tests/ -v                     # 전체 (857개)
+pytest tests/ -v                     # 전체 (863개)
 pytest tests/{market,content,briefing,agents,feedback}/ -v  # 기존 모듈별
 pytest tests/trading/ -v             # 자동 매매 시스템 (471개)
 pytest tests/ --cov=alphapulse       # 커버리지

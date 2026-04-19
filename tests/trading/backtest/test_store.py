@@ -208,7 +208,7 @@ class TestTradeStorage:
         sample_result.trades = _make_trades()
         run_id = store.save_run(sample_result)
         rts = store.get_round_trips(run_id)
-        loser = rts[1]  # 73000 → 71000
+        loser = rts[1]  # 73000 -> 71000
         assert loser["pnl"] < 0
         assert loser["return_pct"] < 0
 
@@ -219,9 +219,104 @@ class TestTradeStorage:
         assert store.get_round_trips(run_id) == []
 
     def test_delete_cleans_trades(self, store, sample_result):
-        """��제 시 거래/라운드트립도 삭제된다."""
+        """삭제 시 거래/라운드트립도 삭제된다."""
         sample_result.trades = _make_trades()
         run_id = store.save_run(sample_result)
         store.delete_run(run_id)
         assert store.get_trades(run_id) == []
         assert store.get_round_trips(run_id) == []
+
+
+def _make_result_with_positions():
+    """포지션이 포함된 백테스트 결과."""
+    from alphapulse.trading.core.models import Position
+
+    stock1 = Stock(code="005930", name="삼성전자", market="KOSPI")
+    stock2 = Stock(code="000660", name="SK하이닉스", market="KOSPI")
+    config = BacktestConfig(
+        initial_capital=100_000_000,
+        start_date="20260406",
+        end_date="20260408",
+        cost_model=CostModel(slippage_model="none"),
+    )
+    snapshots = [
+        PortfolioSnapshot(
+            date="20260406", cash=90_000_000,
+            positions=[
+                Position(stock=stock1, quantity=100, avg_price=72000,
+                         current_price=73000, unrealized_pnl=100000,
+                         weight=0.073, strategy_id="momentum"),
+            ],
+            total_value=100_300_000, daily_return=0.3,
+            cumulative_return=0.3, drawdown=0.0,
+        ),
+        PortfolioSnapshot(
+            date="20260407", cash=80_000_000,
+            positions=[
+                Position(stock=stock1, quantity=100, avg_price=72000,
+                         current_price=74000, unrealized_pnl=200000,
+                         weight=0.074, strategy_id="momentum"),
+                Position(stock=stock2, quantity=50, avg_price=120000,
+                         current_price=121000, unrealized_pnl=50000,
+                         weight=0.060, strategy_id="value"),
+            ],
+            total_value=101_250_000, daily_return=0.95,
+            cumulative_return=1.25, drawdown=0.0,
+        ),
+    ]
+    return BacktestResult(
+        snapshots=snapshots, trades=[], metrics={"total_return": 1.25},
+        config=config,
+    )
+
+
+class TestPositionStorage:
+    """종목별 보유 포지션 저장/조회 테스트."""
+
+    def test_positions_saved(self, store):
+        """일별 포지션이 DB에 저장된다."""
+        result = _make_result_with_positions()
+        run_id = store.save_run(result)
+        positions = store.get_positions(run_id)
+        assert len(positions) == 3
+
+    def test_positions_by_date(self, store):
+        """특정 날짜의 포지션만 조회한다."""
+        result = _make_result_with_positions()
+        run_id = store.save_run(result)
+        pos = store.get_positions(run_id, date="20260407")
+        assert len(pos) == 2
+        codes = {p["code"] for p in pos}
+        assert codes == {"005930", "000660"}
+
+    def test_positions_by_code(self, store):
+        """특정 종목의 전 기간 포지션을 조회한다."""
+        result = _make_result_with_positions()
+        run_id = store.save_run(result)
+        pos = store.get_positions(run_id, code="005930")
+        assert len(pos) == 2
+
+    def test_position_fields(self, store):
+        """포지션에 필수 필드가 있다."""
+        result = _make_result_with_positions()
+        run_id = store.save_run(result)
+        pos = store.get_positions(run_id, date="20260406")
+        p = pos[0]
+        assert p["code"] == "005930"
+        assert p["quantity"] == 100
+        assert p["avg_price"] == 72000
+        assert p["current_price"] == 73000
+        assert p["unrealized_pnl"] == 100000
+        assert p["strategy_id"] == "momentum"
+
+    def test_delete_cleans_positions(self, store):
+        """삭제 시 포지션도 삭제된다."""
+        result = _make_result_with_positions()
+        run_id = store.save_run(result)
+        store.delete_run(run_id)
+        assert store.get_positions(run_id) == []
+
+    def test_no_positions(self, store, sample_result):
+        """포지션 없는 스냅샷은 빈 리스트."""
+        run_id = store.save_run(sample_result)
+        assert store.get_positions(run_id) == []

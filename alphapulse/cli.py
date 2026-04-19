@@ -1353,6 +1353,106 @@ def backtest_compare(run_id_1, run_id_2):
     click.echo(f"{'='*70}")
 
 
+@backtest.command(name="positions")
+@click.argument("run_id")
+@click.option("--date", default=None, help="특정 날짜 (YYYYMMDD, 기본: 최종일)")
+@click.option("--code", default=None, help="종목코드 필터")
+@click.option("--all-dates", is_flag=True, help="전 기��� 보유 이력 표시")
+def backtest_positions(run_id, date, code, all_dates):
+    """백테스트의 종목별 보유 포지션을 조회한다.
+
+    RUN_ID는 전체 UUID 또는 앞 8자리 접두사.
+
+    예:
+      ap trading backtest positions abc12345
+      ap trading backtest positions abc12345 --date 20240315
+      ap trading backtest positions abc12345 --code 005930 --all-dates
+    """
+    from alphapulse.core.config import Config
+    from alphapulse.trading.backtest.store import BacktestStore
+
+    cfg = Config()
+    bt_store = BacktestStore(db_path=cfg.DATA_DIR / "backtest.db")
+
+    run = _resolve_run(bt_store, run_id)
+    if not run:
+        click.echo(f"결과를 찾을 수 없습니다: {run_id}")
+        return
+
+    if all_dates:
+        positions = bt_store.get_positions(
+            run["run_id"], code=code or "",
+        )
+    elif date:
+        positions = bt_store.get_positions(
+            run["run_id"], date=date, code=code or "",
+        )
+    else:
+        positions = bt_store.get_positions(
+            run["run_id"], date=run["end_date"], code=code or "",
+        )
+        if not positions:
+            positions = bt_store.get_positions(
+                run["run_id"], code=code or "",
+            )
+            seen_dates = sorted({p["date"] for p in positions})
+            if seen_dates:
+                last = seen_dates[-1]
+                positions = [p for p in positions if p["date"] == last]
+
+    if not positions:
+        click.echo("보유 포지션 기록이 없습니다.")
+        return
+
+    dates = sorted({p["date"] for p in positions})
+    show_date_col = len(dates) > 1
+
+    click.echo(f"\n{'='*80}")
+    click.echo(
+        f" 보유 포지션 — {run.get('name', '')} "
+        f"({dates[0]}{'~' + dates[-1] if show_date_col else ''})"
+    )
+    click.echo(f"{'='*80}")
+
+    if show_date_col:
+        click.echo(
+            f" {'날짜':>8}  {'종목코드':>8}  {'종목명':<10}  "
+            f"{'수량':>6}  {'평단가':>10}  {'현재가':>10}  "
+            f"{'평가손익':>12}  {'비중':>6}"
+        )
+    else:
+        click.echo(
+            f" {'종목코드':>8}  {'종목명':<10}  "
+            f"{'수량':>6}  {'평단가':>10}  {'현재가':>10}  "
+            f"{'평가손익':>12}  {'비중':>6}"
+        )
+    click.echo(f" {'-'*78}")
+
+    total_pnl = 0.0
+    for p in positions:
+        pnl = p.get("unrealized_pnl", 0)
+        total_pnl += pnl
+        name = p.get("name", "")[:9]
+        weight_str = f"{p.get('weight', 0) * 100:.1f}%"
+        if show_date_col:
+            click.echo(
+                f" {p['date']:>8}  {p['code']:>8}  {name:<10}  "
+                f"{p['quantity']:>6}  {p['avg_price']:>10,.0f}  "
+                f"{p['current_price']:>10,.0f}  "
+                f"{pnl:>+12,.0f}  {weight_str:>6}"
+            )
+        else:
+            click.echo(
+                f" {p['code']:>8}  {name:<10}  "
+                f"{p['quantity']:>6}  {p['avg_price']:>10,.0f}  "
+                f"{p['current_price']:>10,.0f}  "
+                f"{pnl:>+12,.0f}  {weight_str:>6}"
+            )
+
+    click.echo(f"\n  종목 수: {len(positions)}  합계 평가손익: {total_pnl:+,.0f}원")
+    click.echo(f"{'='*80}")
+
+
 @backtest.command(name="trades")
 @click.argument("run_id")
 @click.option("--code", default=None, help="종목코드 필터")

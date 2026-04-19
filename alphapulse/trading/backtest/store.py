@@ -99,6 +99,21 @@ class BacktestStore:
                     PRIMARY KEY (run_id, seq),
                     FOREIGN KEY (run_id) REFERENCES runs(run_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS positions (
+                    run_id TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    name TEXT DEFAULT '',
+                    quantity INTEGER,
+                    avg_price REAL,
+                    current_price REAL,
+                    unrealized_pnl REAL,
+                    weight REAL,
+                    strategy_id TEXT DEFAULT '',
+                    PRIMARY KEY (run_id, date, code),
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                );
                 """
             )
 
@@ -230,6 +245,26 @@ class BacktestStore:
                     rt_rows,
                 )
 
+            # 일별 종목별 보유 포지션 저장
+            pos_rows = []
+            for s in result.snapshots:
+                for p in s.positions:
+                    pos_rows.append((
+                        run_id, s.date, p.stock.code, p.stock.name,
+                        p.quantity, p.avg_price, p.current_price,
+                        p.unrealized_pnl, p.weight, p.strategy_id,
+                    ))
+            if pos_rows:
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO positions (run_id, date, code,
+                        name, quantity, avg_price, current_price,
+                        unrealized_pnl, weight, strategy_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    pos_rows,
+                )
+
         return run_id
 
     def get_run(self, run_id: str) -> dict | None:
@@ -312,6 +347,33 @@ class BacktestStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_positions(self, run_id: str, date: str = "",
+                      code: str = "") -> list[dict]:
+        """종목별 보유 포지션을 조회한다.
+
+        Args:
+            run_id: 실행 ID.
+            date: 특정 날짜 (빈 문자열이면 전체).
+            code: 특정 종목코드 (빈 문자열이면 전체).
+
+        Returns:
+            포지션 딕셔너리 리스트.
+        """
+        query = "SELECT * FROM positions WHERE run_id = ?"
+        params: list = [run_id]
+        if date:
+            query += " AND date = ?"
+            params.append(date)
+        if code:
+            query += " AND code = ?"
+            params.append(code)
+        query += " ORDER BY date, code"
+
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
     def delete_run(self, run_id: str) -> None:
         """실행과 관련 데이터를 모두 삭제한다.
 
@@ -319,6 +381,7 @@ class BacktestStore:
             run_id: 실행 ID.
         """
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM positions WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM round_trips WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM trades WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM snapshots WHERE run_id = ?", (run_id,))
