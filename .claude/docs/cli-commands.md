@@ -22,6 +22,7 @@ ap trading signals [--strategy] [--market] [--top]     # 전략 시그널
 ap trading backtest run [--strategy] [--start] [--end] [--capital] [--html] # 백테스트 실행
 ap trading backtest list [--limit]                     # 과거 결과 목록
 ap trading backtest report <run_id> [--html]           # 상세 리포트
+ap trading backtest trades <run_id> [--code] [--winner/--loser] # 거래 이력
 ap trading backtest compare <id1> <id2>                # 두 결과 비교
 ap trading run [--mode paper|live] [--daemon]          # 매매 실행
 ap trading status                                      # 시스템 상태

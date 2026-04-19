@@ -172,3 +172,28 @@ class TestBacktestGroup:
             )
         assert result.exit_code == 0
         assert "찾을 수 없습니다" in result.output
+
+    def test_backtest_trades_not_found(self, runner, tmp_path):
+        """존재하지 않는 run_id면 안내 메시지."""
+        with patch("alphapulse.core.config.Config") as mock_cfg:
+            mock_cfg.return_value.DATA_DIR = tmp_path
+            result = runner.invoke(
+                cli, ["trading", "backtest", "trades", "nonexist"]
+            )
+        assert result.exit_code == 0
+        assert "찾을 수 없습니다" in result.output
+
+    def test_backtest_trades_empty(self, runner, tmp_path):
+        """거래 없으면 안내 메시지."""
+        from alphapulse.trading.backtest.store import BacktestStore
+
+        store = BacktestStore(db_path=tmp_path / "backtest.db")
+        run_id = _seed_run(store, name="no_trades")
+
+        with patch("alphapulse.core.config.Config") as mock_cfg:
+            mock_cfg.return_value.DATA_DIR = tmp_path
+            result = runner.invoke(
+                cli, ["trading", "backtest", "trades", run_id[:8]]
+            )
+        assert result.exit_code == 0
+        assert "없습니다" in result.output

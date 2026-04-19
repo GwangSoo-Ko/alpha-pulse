@@ -38,6 +38,7 @@ class SimBroker:
         self.cash: float = initial_cash
         self._positions: dict[str, dict] = {}  # code → {stock, quantity, avg_price, strategy_id}
         self.trade_log: list[OrderResult] = []
+        self.current_date: str = ""
 
     def submit_order(self, order: Order) -> OrderResult:
         """주문을 체결한다.
@@ -136,6 +137,7 @@ class SimBroker:
             commission=commission,
             tax=0.0,
             filled_at=datetime.now(),
+            trade_date=self.current_date,
         )
         self.trade_log.append(result)
         return result
@@ -170,6 +172,7 @@ class SimBroker:
             commission=commission,
             tax=tax,
             filled_at=datetime.now(),
+            trade_date=self.current_date,
         )
         self.trade_log.append(result)
         return result

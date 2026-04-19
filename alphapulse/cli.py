@@ -1353,6 +1353,96 @@ def backtest_compare(run_id_1, run_id_2):
     click.echo(f"{'='*70}")
 
 
+@backtest.command(name="trades")
+@click.argument("run_id")
+@click.option("--code", default=None, help="종목코드 필터")
+@click.option("--winner/--loser", default=None, help="승/패 필터")
+@click.option("--limit", default=50, type=int, help="표시 건수")
+def backtest_trades(run_id, code, winner, limit):
+    """백테스트의 개별 거래(라운드트립)를 조회한다.
+
+    RUN_ID는 전체 UUID 또는 앞 8자리 접두사.
+
+    예:
+      ap trading backtest trades abc12345
+      ap trading backtest trades abc12345 --code 005930
+      ap trading backtest trades abc12345 --winner --limit 10
+    """
+    from alphapulse.core.config import Config
+    from alphapulse.trading.backtest.store import BacktestStore
+
+    cfg = Config()
+    bt_store = BacktestStore(db_path=cfg.DATA_DIR / "backtest.db")
+
+    run = _resolve_run(bt_store, run_id)
+    if not run:
+        click.echo(f"결과를 찾을 수 없습니다: {run_id}")
+        return
+
+    rts = bt_store.get_round_trips(run["run_id"])
+    if not rts:
+        trades = bt_store.get_trades(run["run_id"])
+        if trades:
+            click.echo(
+                f"체결 {len(trades)}건 있으나 라운드트립(매수→매도 쌍) 없음."
+            )
+            click.echo("(매수만 있고 매도가 없는 경우)")
+        else:
+            click.echo("거래 기록이 없습니다.")
+        return
+
+    if code:
+        rts = [r for r in rts if r["code"] == code]
+    if winner is True:
+        rts = [r for r in rts if r["pnl"] > 0]
+    elif winner is False:
+        rts = [r for r in rts if r["pnl"] <= 0]
+
+    total = len(rts)
+    rts = rts[:limit]
+
+    click.echo(f"\n{'='*90}")
+    click.echo(
+        f" 거래 이력 — {run.get('name', '')} "
+        f"({run['start_date']}~{run['end_date']})"
+    )
+    click.echo(f"{'='*90}")
+    click.echo(
+        f" {'#':>3}  {'종목':>8}  {'종목명':<10}  "
+        f"{'매수일':>8}  {'매수가':>10}  {'매도일':>8}  {'매도가':>10}  "
+        f"{'수익률':>7}  {'보유':>4}  {'손익':>12}"
+    )
+    click.echo(f" {'-'*88}")
+
+    for i, rt in enumerate(rts, 1):
+        name = rt.get("name", "")[:9]
+        ret_str = f"{rt['return_pct']:+.1f}%"
+        pnl_str = f"{rt['pnl']:+,.0f}"
+        click.echo(
+            f" {i:>3}  {rt['code']:>8}  {name:<10}  "
+            f"{rt['buy_date']:>8}  {rt['buy_price']:>10,.0f}  "
+            f"{rt['sell_date']:>8}  {rt['sell_price']:>10,.0f}  "
+            f"{ret_str:>7}  {rt['holding_days']:>3}일  {pnl_str:>12}"
+        )
+
+    # 요약
+    click.echo(f"\n{'-'*90}")
+    wins = [r for r in rts if r["pnl"] > 0]
+    losses = [r for r in rts if r["pnl"] <= 0]
+    total_pnl = sum(r["pnl"] for r in rts)
+    avg_hold = (
+        sum(r["holding_days"] for r in rts) / len(rts) if rts else 0
+    )
+    click.echo(
+        f" 합계: {len(rts)}건 (승 {len(wins)} / 패 {len(losses)})  "
+        f"총 손익: {total_pnl:+,.0f}원  "
+        f"평균 보유: {avg_hold:.0f}일"
+    )
+    if total > limit:
+        click.echo(f" ({total}건 중 {limit}건 표시)")
+    click.echo(f"{'='*90}")
+
+
 def _resolve_run(bt_store, run_id: str) -> dict | None:
     """run_id 전체 또는 접두사로 백테스트 결과를 찾는다."""
     run = bt_store.get_run(run_id)

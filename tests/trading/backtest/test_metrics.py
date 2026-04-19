@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from alphapulse.trading.backtest.metrics import BacktestMetrics
+from alphapulse.trading.backtest.metrics import BacktestMetrics, build_round_trips
 from alphapulse.trading.core.models import OrderResult, PortfolioSnapshot
 
 
@@ -240,3 +240,68 @@ class TestEdgeCases:
         assert result["win_rate"] == 0.0
         assert result["profit_factor"] == 0.0
         assert result["total_trades"] == 0
+
+
+class TestBuildRoundTrips:
+    """build_round_trips 상세 라운드트립 테스트."""
+
+    def test_round_trip_count(self, sample_trades):
+        """5개 라운드트립이 생성된다 (3승 2패)."""
+        rts = build_round_trips(sample_trades)
+        assert len(rts) == 5
+
+    def test_round_trip_fields(self, sample_trades):
+        """라운드트립에 필수 필드가 모두 있다."""
+        rts = build_round_trips(sample_trades)
+        required = {
+            "code", "name", "buy_date", "buy_price",
+            "sell_date", "sell_price", "quantity",
+            "pnl", "return_pct", "holding_days",
+            "commission", "tax", "strategy_id",
+        }
+        for rt in rts:
+            assert required.issubset(rt.keys())
+
+    def test_winning_trade_positive_pnl(self, sample_trades):
+        """승리 거래는 양의 PnL을 가진다."""
+        rts = build_round_trips(sample_trades)
+        first = rts[0]  # 72000 → 74000
+        assert first["pnl"] > 0
+        assert first["return_pct"] > 0
+
+    def test_losing_trade_negative_pnl(self, sample_trades):
+        """패배 거래는 음의 PnL을 가진다."""
+        rts = build_round_trips(sample_trades)
+        losers = [r for r in rts if r["pnl"] < 0]
+        assert len(losers) == 2
+
+    def test_trade_date_recorded(self):
+        """trade_date가 있으면 보유기간이 계산된다."""
+        from alphapulse.trading.core.models import Order, Stock
+
+        stock = Stock(code="005930", name="삼성전자", market="KOSPI")
+        buy_order = Order(stock=stock, side="BUY", order_type="MARKET",
+                          quantity=10, price=None, strategy_id="test")
+        sell_order = Order(stock=stock, side="SELL", order_type="MARKET",
+                           quantity=10, price=None, strategy_id="test")
+        trades = [
+            OrderResult(
+                order_id="b1", order=buy_order, status="filled",
+                filled_quantity=10, filled_price=50000,
+                commission=7, tax=0, trade_date="20260101",
+            ),
+            OrderResult(
+                order_id="s1", order=sell_order, status="filled",
+                filled_quantity=10, filled_price=55000,
+                commission=8, tax=990, trade_date="20260115",
+            ),
+        ]
+        rts = build_round_trips(trades)
+        assert len(rts) == 1
+        assert rts[0]["holding_days"] == 14
+        assert rts[0]["buy_date"] == "20260101"
+        assert rts[0]["sell_date"] == "20260115"
+
+    def test_empty_trades(self):
+        """빈 거래 목록 → 빈 라운드트립."""
+        assert build_round_trips([]) == []

@@ -7,7 +7,7 @@ import pytest
 from alphapulse.trading.backtest.engine import BacktestConfig, BacktestResult
 from alphapulse.trading.backtest.store import BacktestStore
 from alphapulse.trading.core.cost_model import CostModel
-from alphapulse.trading.core.models import PortfolioSnapshot
+from alphapulse.trading.core.models import Order, OrderResult, PortfolioSnapshot, Stock
 
 
 @pytest.fixture
@@ -136,3 +136,92 @@ class TestBacktestStore:
         run = store.get_run(run_id)
         assert json.loads(run["strategies"]) == []
         assert json.loads(run["allocations"]) == {}
+
+
+def _make_trades():
+    """테스트용 체결 이력 (2건 라운드트립)."""
+    stock = Stock(code="005930", name="삼성전자", market="KOSPI")
+    buy = Order(stock=stock, side="BUY", order_type="MARKET",
+                quantity=100, price=None, strategy_id="momentum")
+    sell = Order(stock=stock, side="SELL", order_type="MARKET",
+                 quantity=100, price=None, strategy_id="momentum")
+    return [
+        OrderResult(
+            order_id="b1", order=buy, status="filled",
+            filled_quantity=100, filled_price=72000,
+            commission=108, tax=0, trade_date="20260406",
+        ),
+        OrderResult(
+            order_id="s1", order=sell, status="filled",
+            filled_quantity=100, filled_price=74000,
+            commission=111, tax=1332, trade_date="20260408",
+        ),
+        OrderResult(
+            order_id="b2", order=buy, status="filled",
+            filled_quantity=100, filled_price=73000,
+            commission=110, tax=0, trade_date="20260409",
+        ),
+        OrderResult(
+            order_id="s2", order=sell, status="filled",
+            filled_quantity=100, filled_price=71000,
+            commission=107, tax=1278, trade_date="20260410",
+        ),
+    ]
+
+
+class TestTradeStorage:
+    """거래 기록 저장/조회 테스트."""
+
+    def test_trades_saved(self, store, sample_result):
+        """체결 기록이 DB에 저장된다."""
+        sample_result.trades = _make_trades()
+        run_id = store.save_run(sample_result)
+        trades = store.get_trades(run_id)
+        assert len(trades) == 4
+        assert trades[0]["code"] == "005930"
+        assert trades[0]["side"] == "BUY"
+
+    def test_round_trips_saved(self, store, sample_result):
+        """라운드트립이 DB에 저장된다."""
+        sample_result.trades = _make_trades()
+        run_id = store.save_run(sample_result)
+        rts = store.get_round_trips(run_id)
+        assert len(rts) == 2
+
+    def test_round_trip_fields(self, store, sample_result):
+        """라운드트립에 상세 필드가 있다."""
+        sample_result.trades = _make_trades()
+        run_id = store.save_run(sample_result)
+        rts = store.get_round_trips(run_id)
+        rt = rts[0]
+        assert rt["code"] == "005930"
+        assert rt["buy_date"] == "20260406"
+        assert rt["sell_date"] == "20260408"
+        assert rt["buy_price"] == 72000
+        assert rt["sell_price"] == 74000
+        assert rt["holding_days"] == 2
+        assert rt["pnl"] > 0
+        assert rt["return_pct"] > 0
+
+    def test_losing_round_trip(self, store, sample_result):
+        """패배 라운드트립의 PnL이 음수다."""
+        sample_result.trades = _make_trades()
+        run_id = store.save_run(sample_result)
+        rts = store.get_round_trips(run_id)
+        loser = rts[1]  # 73000 → 71000
+        assert loser["pnl"] < 0
+        assert loser["return_pct"] < 0
+
+    def test_empty_trades(self, store, sample_result):
+        """거래 없으면 빈 리스트."""
+        run_id = store.save_run(sample_result)
+        assert store.get_trades(run_id) == []
+        assert store.get_round_trips(run_id) == []
+
+    def test_delete_cleans_trades(self, store, sample_result):
+        """��제 시 거래/라운드트립도 삭제된다."""
+        sample_result.trades = _make_trades()
+        run_id = store.save_run(sample_result)
+        store.delete_run(run_id)
+        assert store.get_trades(run_id) == []
+        assert store.get_round_trips(run_id) == []

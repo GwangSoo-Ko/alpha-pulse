@@ -63,6 +63,42 @@ class BacktestStore:
                     PRIMARY KEY (run_id, date),
                     FOREIGN KEY (run_id) REFERENCES runs(run_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS trades (
+                    run_id TEXT NOT NULL,
+                    order_id TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    name TEXT DEFAULT '',
+                    side TEXT NOT NULL,
+                    quantity INTEGER,
+                    price REAL,
+                    commission REAL,
+                    tax REAL,
+                    strategy_id TEXT DEFAULT '',
+                    trade_date TEXT DEFAULT '',
+                    PRIMARY KEY (run_id, order_id),
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS round_trips (
+                    run_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    code TEXT NOT NULL,
+                    name TEXT DEFAULT '',
+                    buy_date TEXT,
+                    buy_price REAL,
+                    sell_date TEXT,
+                    sell_price REAL,
+                    quantity INTEGER,
+                    pnl REAL,
+                    return_pct REAL,
+                    holding_days INTEGER,
+                    commission REAL,
+                    tax REAL,
+                    strategy_id TEXT DEFAULT '',
+                    PRIMARY KEY (run_id, seq),
+                    FOREIGN KEY (run_id) REFERENCES runs(run_id)
+                );
                 """
             )
 
@@ -139,6 +175,61 @@ class BacktestStore:
                 snapshot_rows,
             )
 
+            # 개별 체결 기록 저장
+            trade_rows = [
+                (
+                    run_id,
+                    t.order_id,
+                    t.order.stock.code,
+                    t.order.stock.name,
+                    t.order.side,
+                    t.filled_quantity,
+                    t.filled_price,
+                    t.commission,
+                    t.tax,
+                    t.order.strategy_id,
+                    t.trade_date,
+                )
+                for t in result.trades
+                if t.status == "filled"
+            ]
+            if trade_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO trades (run_id, order_id, code, name, side,
+                        quantity, price, commission, tax, strategy_id,
+                        trade_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    trade_rows,
+                )
+
+            # 라운드트립 저장
+            from alphapulse.trading.backtest.metrics import build_round_trips
+            rts = build_round_trips(result.trades)
+            rt_rows = [
+                (
+                    run_id, i, rt["code"], rt["name"],
+                    rt["buy_date"], rt["buy_price"],
+                    rt["sell_date"], rt["sell_price"],
+                    rt["quantity"], rt["pnl"], rt["return_pct"],
+                    rt["holding_days"], rt["commission"], rt["tax"],
+                    rt["strategy_id"],
+                )
+                for i, rt in enumerate(rts)
+            ]
+            if rt_rows:
+                conn.executemany(
+                    """
+                    INSERT INTO round_trips (run_id, seq, code, name,
+                        buy_date, buy_price, sell_date, sell_price,
+                        quantity, pnl, return_pct, holding_days,
+                        commission, tax, strategy_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rt_rows,
+                )
+
         return run_id
 
     def get_run(self, run_id: str) -> dict | None:
@@ -187,12 +278,48 @@ class BacktestStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_trades(self, run_id: str) -> list[dict]:
+        """실행의 개별 체결 기록을 조회한다.
+
+        Args:
+            run_id: 실행 ID.
+
+        Returns:
+            체결 기록 딕셔너리 리스트 (날짜순).
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE run_id = ? ORDER BY trade_date, side",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_round_trips(self, run_id: str) -> list[dict]:
+        """실행의 라운드트립(매수→매도 쌍)을 조회한다.
+
+        Args:
+            run_id: 실행 ID.
+
+        Returns:
+            라운드트립 딕셔너리 리스트 (매수일순).
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM round_trips WHERE run_id = ? ORDER BY buy_date",
+                (run_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def delete_run(self, run_id: str) -> None:
-        """실행과 관련 스냅샷을 삭제한다.
+        """실행과 관련 데이터를 모두 삭제한다.
 
         Args:
             run_id: 실행 ID.
         """
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("DELETE FROM round_trips WHERE run_id = ?", (run_id,))
+            conn.execute("DELETE FROM trades WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM snapshots WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM runs WHERE run_id = ?", (run_id,))

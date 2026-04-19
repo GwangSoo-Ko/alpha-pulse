@@ -339,3 +339,73 @@ class BacktestMetrics:
             "information_ratio": 0.0,
             "tracking_error": 0.0,
         }
+
+
+def build_round_trips(trades: list[OrderResult]) -> list[dict]:
+    """체결 이력에서 상세 라운드트립(매수→매도 쌍) 목록을 생성한다.
+
+    FIFO 방식으로 매수-매도를 매칭하고, 보유기간·수익률·손익을 계산한다.
+
+    Args:
+        trades: 시간순 체결 이력.
+
+    Returns:
+        라운드트립 딕셔너리 리스트.
+    """
+    buys: dict[str, list[OrderResult]] = {}
+    result: list[dict] = []
+
+    for trade in trades:
+        if trade.status != "filled":
+            continue
+        code = trade.order.stock.code
+
+        if trade.order.side == "BUY":
+            buys.setdefault(code, []).append(trade)
+        else:
+            if code not in buys or not buys[code]:
+                continue
+            buy = buys[code].pop(0)
+            qty = min(trade.filled_quantity, buy.filled_quantity)
+            cost = buy.filled_price * qty
+            revenue = trade.filled_price * qty
+            total_fees = (
+                buy.commission + trade.commission + trade.tax
+            )
+            pnl = revenue - cost - total_fees
+            return_pct = (pnl / cost * 100) if cost > 0 else 0.0
+
+            buy_date = buy.trade_date or ""
+            sell_date = trade.trade_date or ""
+            holding_days = _calc_holding_days(buy_date, sell_date)
+
+            result.append({
+                "code": code,
+                "name": trade.order.stock.name,
+                "buy_date": buy_date,
+                "buy_price": round(buy.filled_price, 2),
+                "sell_date": sell_date,
+                "sell_price": round(trade.filled_price, 2),
+                "quantity": qty,
+                "pnl": round(pnl, 2),
+                "return_pct": round(return_pct, 2),
+                "holding_days": holding_days,
+                "commission": round(buy.commission + trade.commission, 2),
+                "tax": round(trade.tax, 2),
+                "strategy_id": trade.order.strategy_id,
+            })
+
+    return result
+
+
+def _calc_holding_days(buy_date: str, sell_date: str) -> int:
+    """두 날짜 사이의 캘린더 일수를 계산한다."""
+    if not buy_date or not sell_date or len(buy_date) != 8:
+        return 0
+    try:
+        from datetime import datetime
+        b = datetime.strptime(buy_date, "%Y%m%d")
+        s = datetime.strptime(sell_date, "%Y%m%d")
+        return (s - b).days
+    except ValueError:
+        return 0

@@ -111,7 +111,8 @@ class OrderResult:
     filled_price: float
     commission: float
     tax: float
-    filled_at: Optional[datetime]
+    filled_at: Optional[datetime] = None
+    trade_date: str = ""
 
 
 @dataclass

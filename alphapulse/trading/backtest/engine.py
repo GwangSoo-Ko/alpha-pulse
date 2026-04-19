@@ -138,6 +138,7 @@ class BacktestEngine:
             if progress_callback is not None:
                 progress_callback(idx, total_days, date)
             self.data_feed.advance_to(date)
+            self.broker.current_date = date
 
             # 전략의 factor_calc에도 시뮬레이션 날짜 전달
             for strategy in self.strategies:
