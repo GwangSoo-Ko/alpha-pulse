@@ -903,7 +903,58 @@ def signals(strategy, market, top):
     click.echo(f"\n  권장 액션: {action_str}")
 
 
-@trading.command()
+@trading.group(invoke_without_command=True)
+@click.pass_context
+def backtest(ctx):
+    """백테스트 실행 및 결과 관리.
+
+    서브커맨드 없이 실행하면 'run'이 기본 동작합니다.
+    """
+    if ctx.invoked_subcommand is None:
+        click.echo("사용법: ap trading backtest [run|list|report|compare] [옵션]")
+        click.echo()
+        click.echo("  run      백테스트 실행 (기본)")
+        click.echo("  list     과거 결과 목록")
+        click.echo("  report   상세 리포트 조회")
+        click.echo("  compare  두 결과 비교")
+
+
+def _print_backtest_metrics(m: dict, snapshots: list) -> None:
+    """백테스트 성과 지표를 터미널에 출력한다."""
+    click.echo(f"{'='*60}")
+    click.echo(" 성과 지표")
+    click.echo(f"{'='*60}")
+    click.echo(f" 총 수익률:        {m.get('total_return', 0):+.2f}%")
+    click.echo(f" CAGR:             {m.get('cagr', 0):+.2f}%")
+    click.echo(f" 샤프 비율:        {m.get('sharpe_ratio', 0):+.2f}")
+    click.echo(f" 소르티노 비율:    {m.get('sortino_ratio', 0):+.2f}")
+    click.echo(f" 최대 낙폭 (MDD):  {m.get('max_drawdown', 0):.2f}%")
+    click.echo(f" 변동성 (연환산):  {m.get('volatility', 0):.2f}%")
+    click.echo(
+        f" 총 주문 체결:     "
+        f"{m.get('total_orders', m.get('total_trades', 0))}건"
+        f" (매수 {m.get('filled_buys', 0)} / 매도 {m.get('filled_sells', 0)})"
+    )
+    rt = m.get("round_trips", 0)
+    if rt > 0:
+        click.echo(
+            f" 라운드트립:       {rt}건"
+            f" (승률 {m.get('win_rate', 0):.1f}%)"
+        )
+    else:
+        click.echo(f" 라운드트립:       {rt}건 (미청산 포지션)")
+    click.echo(f" 턴오버:           {m.get('turnover', 0):.2f}x")
+    click.echo(f" 스냅샷 수:        {len(snapshots)}")
+    click.echo(f"{'='*60}")
+
+    if snapshots:
+        first = snapshots[0]
+        last = snapshots[-1]
+        click.echo(f" 시작 자산: {first.total_value:,.0f}원 ({first.date})")
+        click.echo(f" 최종 자산: {last.total_value:,.0f}원 ({last.date})")
+
+
+@backtest.command(name="run")
 @click.option("--strategy", default="momentum",
               help="전략 ID (momentum/value/quality_momentum/topdown_etf)")
 @click.option("--start", default=None, help="시작일 YYYYMMDD (기본 3년 전)")
@@ -911,12 +962,17 @@ def signals(strategy, market, top):
 @click.option("--capital", default=None, type=int, help="초기 자본 (원)")
 @click.option("--market", default="KOSPI", help="시장 (KOSPI/KOSDAQ)")
 @click.option("--top", default=20, type=int, help="상위 N종목 편입")
-def backtest(strategy, start, end, capital, market, top):
+@click.option("--name", default="", help="결과 이름 (선택)")
+@click.option("--no-save", is_flag=True, help="결과를 DB에 저장하지 않음")
+@click.option("--html", default=None, help="HTML 리포트 저장 경로 (선택)")
+def backtest_run(strategy, start, end, capital, market, top, name, no_save,
+                 html):
     """백테스트 실행 — 전략의 과거 성과 검증.
 
     예:
-      ap trading backtest --strategy momentum --start 20230101 --end 20260410
-      ap trading backtest --strategy value --capital 200000000 --top 15
+      ap trading backtest run --strategy momentum --start 20230101
+      ap trading backtest run --strategy topdown_etf --market KOSPI
+      ap trading backtest run --strategy value --html report.html
     """
     from datetime import datetime, timedelta
 
@@ -936,12 +992,12 @@ def backtest(strategy, start, end, capital, market, top):
     from alphapulse.trading.strategy.quality_momentum import (
         QualityMomentumStrategy,
     )
+    from alphapulse.trading.strategy.topdown_etf import TopDownETFStrategy
     from alphapulse.trading.strategy.value import ValueStrategy
 
     cfg = Config()
     db_path = cfg.TRADING_DB_PATH
 
-    # 기본 날짜 설정
     if end is None:
         end = datetime.now().strftime("%Y%m%d")
     if start is None:
@@ -959,7 +1015,6 @@ def backtest(strategy, start, end, capital, market, top):
     click.echo(f" 상위 N:  {top}")
     click.echo(f"{'='*60}\n")
 
-    # 데이터 피드
     click.echo("[1/4] 데이터 피드 로드...")
     data_feed = TradingStoreDataFeed(db_path=db_path, market=market)
     if not data_feed.codes:
@@ -967,7 +1022,6 @@ def backtest(strategy, start, end, capital, market, top):
         return
     click.echo(f"  -> {len(data_feed.codes)}종목")
 
-    # 전략 생성
     click.echo("[2/4] 전략 초기화...")
     ranker = MultiFactorRanker(weights={
         "momentum": 0.25, "flow": 0.25, "value": 0.20,
@@ -977,6 +1031,7 @@ def backtest(strategy, start, end, capital, market, top):
         "momentum": MomentumStrategy,
         "value": ValueStrategy,
         "quality_momentum": QualityMomentumStrategy,
+        "topdown_etf": TopDownETFStrategy,
     }
     if strategy not in strategy_map:
         click.echo(f"  ERROR: 지원하지 않는 전략: {strategy}")
@@ -984,7 +1039,6 @@ def backtest(strategy, start, end, capital, market, top):
         return
 
     strat_cls = strategy_map[strategy]
-    # 일부 전략은 ranker + factor_calc 필요
     try:
         factor_calc = FactorCalculator(data_feed.store)
         strat = strat_cls(
@@ -993,12 +1047,10 @@ def backtest(strategy, start, end, capital, market, top):
             config={"top_n": top},
         )
     except TypeError:
-        # 다른 생성자 시그니처
         strat = strat_cls(config={"top_n": top})
 
     click.echo(f"  -> {strat.strategy_id} 로드")
 
-    # 엔진 (SimBroker는 엔진 내부에서 생성)
     click.echo("[3/4] 엔진 실행...")
     cost_model = CostModel(
         commission_rate=cfg.BACKTEST_COMMISSION,
@@ -1027,34 +1079,274 @@ def backtest(strategy, start, end, capital, market, top):
         traceback.print_exc()
         return
 
-    # 결과 출력
     click.echo("\n[4/4] 결과 리포트\n")
-    m = result.metrics
+    _print_backtest_metrics(result.metrics, result.snapshots)
+
+    # DB 저장
+    if not no_save:
+        from alphapulse.trading.backtest.store import BacktestStore
+
+        bt_store = BacktestStore(db_path=cfg.DATA_DIR / "backtest.db")
+        run_id = bt_store.save_run(
+            result, name=name or f"{strategy}_{start}_{end}",
+            strategies=[strategy],
+        )
+        click.echo(f"\n  결과 저장: {run_id[:8]}...")
+
+    # HTML 리포트
+    if html:
+        from alphapulse.trading.backtest.report import BacktestReport
+
+        BacktestReport().save_html(result, html)
+        click.echo(f"  HTML 리포트: {html}")
+
+
+@backtest.command(name="list")
+@click.option("--limit", default=20, type=int, help="표시 건수")
+def backtest_list(limit):
+    """과거 백테스트 결과 목록을 조회한다."""
+    import json
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.backtest.store import BacktestStore
+
+    cfg = Config()
+    bt_store = BacktestStore(db_path=cfg.DATA_DIR / "backtest.db")
+    runs = bt_store.list_runs()
+
+    if not runs:
+        click.echo("저장된 백테스트 결과가 없습니다.")
+        click.echo("'ap trading backtest run' 으로 백테스트를 실행하세요.")
+        return
+
+    click.echo(f"\n{'='*80}")
+    click.echo(" 백테스트 결과 목록")
+    click.echo(f"{'='*80}")
+    click.echo(
+        f" {'ID':>8}  {'이름':<25}  {'기간':<21}  "
+        f"{'수익률':>8}  {'샤프':>6}  {'MDD':>8}"
+    )
+    click.echo(f" {'-'*78}")
+
+    for run in runs[:limit]:
+        rid = run["run_id"][:8]
+        run_name = run.get("name", "")[:24]
+        period = f"{run['start_date']}~{run['end_date']}"
+        metrics = json.loads(run.get("metrics", "{}"))
+        total_ret = metrics.get("total_return", 0)
+        sharpe = metrics.get("sharpe_ratio", 0)
+        mdd = metrics.get("max_drawdown", 0)
+        click.echo(
+            f" {rid:>8}  {run_name:<25}  {period:<21}  "
+            f"{total_ret:>+7.2f}%  {sharpe:>+5.2f}  {mdd:>+7.2f}%"
+        )
+
+    if len(runs) > limit:
+        click.echo(f"\n  ({len(runs)}건 중 {limit}건 표시)")
+
+
+@backtest.command(name="report")
+@click.argument("run_id")
+@click.option("--html", default=None, help="HTML 리포트 저장 경로 (선택)")
+def backtest_report(run_id, html):
+    """특정 백테스트 결과의 상세 리포트를 조회한다.
+
+    RUN_ID는 전체 UUID 또는 앞 8자리 접두사.
+    """
+    import json
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.backtest.store import BacktestStore
+
+    cfg = Config()
+    bt_store = BacktestStore(db_path=cfg.DATA_DIR / "backtest.db")
+
+    run = _resolve_run(bt_store, run_id)
+    if not run:
+        click.echo(f"결과를 찾을 수 없습니다: {run_id}")
+        return
+
+    metrics = json.loads(run.get("metrics", "{}"))
+    strategies = json.loads(run.get("strategies", "[]"))
+    snapshots = bt_store.get_snapshots(run["run_id"])
+
+    click.echo(f"\n{'='*60}")
+    click.echo(" 백테스트 상�� 리포트")
     click.echo(f"{'='*60}")
-    click.echo(" 성과 지표")
-    click.echo(f"{'='*60}")
-    # metrics.py는 이미 % 단위로 반환 (× 100 금지)
-    click.echo(f" 총 수익률:        {m.get('total_return', 0):+.2f}%")
-    click.echo(f" CAGR:             {m.get('cagr', 0):+.2f}%")
-    click.echo(f" 샤프 비율:        {m.get('sharpe_ratio', 0):+.2f}")
-    click.echo(f" 소르티노 비율:    {m.get('sortino_ratio', 0):+.2f}")
-    click.echo(f" 최대 낙폭 (MDD):  {m.get('max_drawdown', 0):.2f}%")
-    click.echo(f" 변동성 (연환산):  {m.get('volatility', 0):.2f}%")
-    click.echo(f" 총 주문 체결:     {m.get('total_orders', m.get('total_trades', 0))}건"
-               f" (매수 {m.get('filled_buys', 0)} / 매도 {m.get('filled_sells', 0)})")
-    rt = m.get('round_trips', 0)
-    click.echo(f" 라운드트립:       {rt}건"
-               f" (승률 {m.get('win_rate', 0):.1f}%)" if rt > 0
-               else f" 라운드트립:       {rt}건 (미청산 포지션)")
-    click.echo(f" 턴오버:           {m.get('turnover', 0):.2f}x")
-    click.echo(f" 스냅샷 수:        {len(result.snapshots)}")
+    click.echo(f" ID:       {run['run_id'][:8]}...")
+    click.echo(f" 이름:     {run.get('name', '')}")
+    click.echo(f" 전략:     {', '.join(strategies)}")
+    click.echo(f" 기간:     {run['start_date']} ~ {run['end_date']}")
+    click.echo(
+        f" 자본금:   {run['initial_capital']:,.0f}원 → "
+        f"{run['final_value']:,.0f}원"
+    )
+    click.echo(f" 벤치마크: {run.get('benchmark', 'KOSPI')}")
+    click.echo()
+
+    # 수익률
+    click.echo("--- 수익률 ---")
+    click.echo(f" 총 수익률:     {metrics.get('total_return', 0):+.2f}%")
+    click.echo(f" CAGR:          {metrics.get('cagr', 0):+.2f}%")
+    click.echo(f" 변동성:        {metrics.get('volatility', 0):.2f}%")
+    click.echo()
+
+    # 리스크
+    click.echo("--- 리스크 ---")
+    click.echo(f" 최대 낙폭:     {metrics.get('max_drawdown', 0):.2f}%")
+    click.echo(f" MDD 지속:      {metrics.get('max_drawdown_duration', 0)}일")
+    click.echo()
+
+    # 리스크 조정
+    click.echo("--- 리스크 조정 ---")
+    click.echo(f" 샤프 비율:     {metrics.get('sharpe_ratio', 0):+.2f}")
+    click.echo(f" 소르티노:      {metrics.get('sortino_ratio', 0):+.2f}")
+    click.echo(f" 칼마 비율:     {metrics.get('calmar_ratio', 0):+.2f}")
+    click.echo()
+
+    # 거래
+    click.echo("--- 거래 ---")
+    click.echo(f" 총 거래:       {metrics.get('total_trades', 0)}건")
+    click.echo(f" 승률:          {metrics.get('win_rate', 0):.1f}%")
+    click.echo(f" 이익 팩터:     {metrics.get('profit_factor', 0):.2f}")
+    click.echo(f" 턴오버:        {metrics.get('turnover', 0):.2f}x")
+    click.echo()
+
+    # 벤치마크
+    click.echo(f"--- 벤치마크 ({run.get('benchmark', 'KOSPI')}) ---")
+    click.echo(f" 벤치마크 수익: {metrics.get('benchmark_return', 0):.2f}%")
+    click.echo(f" 초과 수익:     {metrics.get('excess_return', 0):+.2f}%")
+    click.echo(f" 베타:          {metrics.get('beta', 0):.2f}")
+    click.echo(f" 알파:          {metrics.get('alpha', 0):+.2f}%")
     click.echo(f"{'='*60}")
 
-    if result.snapshots:
-        first = result.snapshots[0]
-        last = result.snapshots[-1]
-        click.echo(f" 시작 자산: {first.total_value:,.0f}원 ({first.date})")
-        click.echo(f" 최종 자산: {last.total_value:,.0f}원 ({last.date})")
+    # 월별 수익률
+    monthly = metrics.get("monthly_returns", [])
+    if monthly:
+        click.echo("\n--- 월별 수익률 ---")
+        for entry in monthly:
+            click.echo(f" {entry['month']}:  {entry['return']:+.2f}%")
+
+    # 스냅샷 요약
+    if snapshots:
+        click.echo(f"\n  스냅샷: {len(snapshots)}개")
+        click.echo(
+            f"  첫 날: {snapshots[0]['date']} "
+            f"({snapshots[0]['total_value']:,.0f}원)"
+        )
+        click.echo(
+            f"  마지막: {snapshots[-1]['date']} "
+            f"({snapshots[-1]['total_value']:,.0f}원)"
+        )
+
+    # HTML 리포트
+    if html:
+        from alphapulse.trading.backtest.engine import BacktestConfig, BacktestResult
+        from alphapulse.trading.backtest.report import BacktestReport
+        from alphapulse.trading.core.cost_model import CostModel
+        from alphapulse.trading.core.models import PortfolioSnapshot
+
+        snap_objs = [
+            PortfolioSnapshot(
+                date=s["date"], cash=s["cash"], positions=[],
+                total_value=s["total_value"],
+                daily_return=s["daily_return"],
+                cumulative_return=s["cumulative_return"],
+                drawdown=s["drawdown"],
+            )
+            for s in snapshots
+        ]
+        bt_result = BacktestResult(
+            snapshots=snap_objs, trades=[], metrics=metrics,
+            config=BacktestConfig(
+                initial_capital=run["initial_capital"],
+                start_date=run["start_date"],
+                end_date=run["end_date"],
+                cost_model=CostModel(),
+                benchmark=run.get("benchmark", "KOSPI"),
+            ),
+        )
+        BacktestReport().save_html(bt_result, html)
+        click.echo(f"\n  HTML 리포트: {html}")
+
+
+@backtest.command(name="compare")
+@click.argument("run_id_1")
+@click.argument("run_id_2")
+def backtest_compare(run_id_1, run_id_2):
+    """두 백테스트 결과를 비교한다.
+
+    RUN_ID는 전체 UUID 또는 앞 8자리 접두사.
+    """
+    import json
+
+    from alphapulse.core.config import Config
+    from alphapulse.trading.backtest.store import BacktestStore
+
+    cfg = Config()
+    bt_store = BacktestStore(db_path=cfg.DATA_DIR / "backtest.db")
+
+    run1 = _resolve_run(bt_store, run_id_1)
+    run2 = _resolve_run(bt_store, run_id_2)
+    if not run1:
+        click.echo(f"결과를 찾을 수 없습니다: {run_id_1}")
+        return
+    if not run2:
+        click.echo(f"결과를 찾을 수 없습니다: {run_id_2}")
+        return
+
+    m1 = json.loads(run1.get("metrics", "{}"))
+    m2 = json.loads(run2.get("metrics", "{}"))
+    n1 = run1.get("name", run1["run_id"][:8])
+    n2 = run2.get("name", run2["run_id"][:8])
+
+    click.echo(f"\n{'='*70}")
+    click.echo(" 백테스트 비교")
+    click.echo(f"{'='*70}")
+    click.echo(f" {'지표':<20}  {n1:>20}  {n2:>20}")
+    click.echo(f" {'-'*68}")
+
+    compare_keys = [
+        ("기간", None, None),
+        ("총 수익률 (%)", "total_return", ".2f"),
+        ("CAGR (%)", "cagr", ".2f"),
+        ("샤프 비율", "sharpe_ratio", ".2f"),
+        ("소르티노 비율", "sortino_ratio", ".2f"),
+        ("MDD (%)", "max_drawdown", ".2f"),
+        ("변동성 (%)", "volatility", ".2f"),
+        ("승률 (%)", "win_rate", ".1f"),
+        ("이익 팩터", "profit_factor", ".2f"),
+        ("총 거래", "total_trades", "d"),
+        ("턴오버", "turnover", ".2f"),
+        ("벤치마크 수익 (%)", "benchmark_return", ".2f"),
+        ("알파 (%)", "alpha", ".2f"),
+        ("베타", "beta", ".2f"),
+    ]
+
+    for label, key, fmt in compare_keys:
+        if key is None:
+            v1 = f"{run1['start_date']}~{run1['end_date']}"
+            v2 = f"{run2['start_date']}~{run2['end_date']}"
+        else:
+            val1 = m1.get(key, 0)
+            val2 = m2.get(key, 0)
+            v1 = f"{val1:{fmt}}"
+            v2 = f"{val2:{fmt}}"
+        click.echo(f" {label:<20}  {v1:>20}  {v2:>20}")
+
+    click.echo(f"{'='*70}")
+
+
+def _resolve_run(bt_store, run_id: str) -> dict | None:
+    """run_id 전체 또는 접두사로 백테스트 결과를 찾는다."""
+    run = bt_store.get_run(run_id)
+    if run:
+        return run
+    runs = bt_store.list_runs()
+    for r in runs:
+        if r["run_id"].startswith(run_id):
+            return r
+    return None
 
 
 @trading.command()
