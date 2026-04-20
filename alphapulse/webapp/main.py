@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import FastAPI
 
 from alphapulse.core.config import Config
+from alphapulse.trading.core.audit import AuditLogger
 from alphapulse.webapp.api.backtest import router as backtest_router
 from alphapulse.webapp.auth.routes import router as auth_router
 from alphapulse.webapp.config import WebAppConfig
@@ -98,6 +99,7 @@ def create_app(
     app.state.backtest_reader = bt_reader
     app.state.alert_log = alert_log
     app.state.monitor = monitor
+    app.state.audit = AuditLogger(db_path=db_path.with_suffix(".audit.db"))
 
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(CSRFMiddleware, secret=cfg.session_secret)

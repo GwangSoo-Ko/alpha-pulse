@@ -67,6 +67,13 @@ async def login(
     )
     attempts.record(email=body.email, ip=client_ip, success=ok)
     if not ok:
+        try:
+            request.app.state.audit.log(
+                "webapp.login_failed", "webapp",
+                {"email": body.email, "ip": client_ip}, "live",
+            )
+        except AttributeError:
+            pass
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = generate_session_token()
@@ -79,6 +86,13 @@ async def login(
         ua=request.headers.get("user-agent", ""),
     )
     users.touch_last_login(user.id)
+    try:
+        request.app.state.audit.log(
+            "webapp.login_success", "webapp",
+            {"user_id": user.id, "email": user.email, "ip": client_ip}, "live",
+        )
+    except AttributeError:
+        pass
 
     response.set_cookie(
         cfg.session_cookie_name,
@@ -104,6 +118,13 @@ async def logout(
     token = request.cookies.get(cfg.session_cookie_name)
     if token:
         sessions.revoke(token)
+    try:
+        request.app.state.audit.log(
+            "webapp.logout", "webapp",
+            {"ip": request.client.host if request.client else ""}, "live",
+        )
+    except AttributeError:
+        pass
     response.delete_cookie(
         cfg.session_cookie_name,
         path="/",

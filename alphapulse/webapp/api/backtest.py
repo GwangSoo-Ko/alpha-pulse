@@ -140,13 +140,22 @@ async def compare_runs(
 @router.delete("/runs/{run_id}")
 async def delete_run(
     run_id: str,
-    _: User = Depends(require_role("admin")),
+    request: Request,
+    user: User = Depends(require_role("admin")),
     reader: BacktestReader = Depends(get_reader),
 ):
     s = reader.resolve_run(run_id)
     if not s:
         raise HTTPException(status_code=404, detail="Run not found")
     reader.delete_run(s.run_id)
+    try:
+        request.app.state.audit.log(
+            "webapp.backtest_delete", "webapp",
+            {"user_id": user.id, "run_id": s.run_id},
+            "live",
+        )
+    except AttributeError:
+        pass
     return {"ok": True}
 
 
@@ -190,6 +199,7 @@ def get_job_runner(request: Request) -> JobRunner:
 @router.post("/run", response_model=RunBacktestResponse)
 async def run_backtest(
     body: RunBacktestRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     user: User = Depends(get_current_user),
     job_repo: JobRepository = Depends(get_job_repo),
@@ -201,6 +211,19 @@ async def run_backtest(
         params=body.model_dump(),
         user_id=user.id,
     )
+    try:
+        request.app.state.audit.log(
+            "webapp.backtest_run", "webapp",
+            {
+                "user_id": user.id,
+                "job_id": job_id,
+                "strategy": body.strategy,
+                "period": f"{body.start or ''}~{body.end or ''}",
+            },
+            "live",
+        )
+    except AttributeError:
+        pass
 
     async def _run() -> None:
         await job_runner.run(
