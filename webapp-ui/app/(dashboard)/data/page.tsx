@@ -1,7 +1,8 @@
 import { cookies } from "next/headers"
 import { apiFetch } from "@/lib/api-client"
-import { StatusTable } from "@/components/domain/data/status-table"
+import { ActionButtons } from "@/components/domain/data/action-buttons"
 import { GapDetector } from "@/components/domain/data/gap-detector"
+import { StatusTable } from "@/components/domain/data/status-table"
 
 export const dynamic = "force-dynamic"
 
@@ -27,6 +28,7 @@ export default async function DataPage() {
       <h1 className="text-2xl font-semibold">데이터 수집 현황</h1>
       <StatusTable tables={data.tables} />
       <GapDetector gaps={data.gaps} />
+      <ActionButtons />
     </div>
   )
 }
