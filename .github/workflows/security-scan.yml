@@ -1,0 +1,50 @@
+name: Security Scan
+on:
+  schedule:
+    - cron: "0 3 * * 1"  # 매주 월요일 03:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "webapp-ui/package.json"
+      - "webapp-ui/pnpm-lock.yaml"
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with: { enable-cache: true }
+      - run: uv sync --dev
+      - run: uv run pip-audit --strict
+      - run: uv run bandit -r alphapulse/ -lll
+
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - working-directory: webapp-ui
+        run: pnpm install --frozen-lockfile
+      - working-directory: webapp-ui
+        run: pnpm audit --audit-level=high
+      - name: osv-scanner
+        uses: google/osv-scanner-action/osv-scanner-action@v1
+        with:
+          scan-args: |-
+            --lockfile=webapp-ui/pnpm-lock.yaml
+            --lockfile=uv.lock
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
