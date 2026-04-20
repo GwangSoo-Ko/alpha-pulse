@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -12,7 +13,9 @@ from alphapulse.core.config import Config
 from alphapulse.webapp.auth.security import hash_password
 from alphapulse.webapp.config import WebAppConfig
 from alphapulse.webapp.notifier import MonitorNotifier
+from alphapulse.webapp.services.settings_service import SettingsService
 from alphapulse.webapp.store.alert_log import AlertLogRepository
+from alphapulse.webapp.store.settings import SettingsRepository
 from alphapulse.webapp.store.users import UserRepository
 from alphapulse.webapp.store.webapp_db import init_webapp_db
 
@@ -24,6 +27,18 @@ def _db_path() -> Path:
     path = cfg.db_path_resolved(base)
     init_webapp_db(path)
     return path
+
+
+def _get_fernet_key() -> bytes:
+    key = os.environ.get("WEBAPP_ENCRYPT_KEY", "").strip()
+    if not key:
+        click.echo(
+            "WEBAPP_ENCRYPT_KEY not set. "
+            "Run `ap webapp init-encrypt-key` first.",
+            err=True,
+        )
+        sys.exit(1)
+    return key.encode("utf-8")
 
 
 @click.group()
@@ -117,3 +132,85 @@ def verify_monitoring() -> None:
         "This is a test message from ap webapp verify-monitoring.",
     ))
     click.echo("Test message sent. Check your monitoring channel.")
+
+
+# === Task 15: settings 관련 명령 ===
+
+
+@webapp.command("init-encrypt-key")
+def init_encrypt_key() -> None:
+    """새 Fernet 키 생성 — .env에 수동 추가."""
+    from cryptography.fernet import Fernet
+
+    key = Fernet.generate_key().decode("utf-8")
+    click.echo("Generated WEBAPP_ENCRYPT_KEY:")
+    click.echo("")
+    click.echo(f"  {key}")
+    click.echo("")
+    click.echo("다음 줄을 .env에 수동 추가하세요:")
+    click.echo(f"WEBAPP_ENCRYPT_KEY={key}")
+    click.echo("")
+    click.echo("주의: 키 분실 시 DB의 암호화 값 복구 불가.")
+
+
+@webapp.command("rotate-encrypt-key")
+@click.option("--new-key", required=True, help="새 키 (base64)")
+def rotate_encrypt_key(new_key: str) -> None:
+    """기존 키로 복호화 → 새 키로 재암호화."""
+    old_key = _get_fernet_key()
+    db = _db_path()
+    old_repo = SettingsRepository(db_path=db, fernet_key=old_key)
+    new_repo = SettingsRepository(db_path=db, fernet_key=new_key.encode("utf-8"))
+    entries = old_repo.list_all()
+    for e in entries:
+        plain = old_repo.get(e.key)
+        if plain is not None:
+            new_repo.set(
+                key=e.key,
+                value=plain,
+                is_secret=e.is_secret,
+                category=e.category,
+                user_id=e.updated_by or 0,
+                tenant_id=e.tenant_id,
+            )
+    click.echo(f"Rotated {len(entries)} settings.")
+    click.echo("이제 .env의 WEBAPP_ENCRYPT_KEY를 새 키로 교체하세요.")
+
+
+@webapp.command("set")
+@click.option("--key", required=True)
+@click.option("--value", required=True)
+@click.option(
+    "--category",
+    required=True,
+    type=click.Choice(["api_key", "risk_limit", "notification", "backtest"]),
+)
+@click.option("--secret/--plain", default=False)
+def set_setting(key: str, value: str, category: str, secret: bool) -> None:
+    """설정 값을 DB에 저장."""
+    fkey = _get_fernet_key()
+    repo = SettingsRepository(db_path=_db_path(), fernet_key=fkey)
+    repo.set(key=key, value=value, is_secret=secret, category=category, user_id=0)
+    click.echo(f"Set: {key}")
+
+
+@webapp.command("list")
+@click.option(
+    "--category",
+    default=None,
+    type=click.Choice(["api_key", "risk_limit", "notification", "backtest"]),
+)
+def list_settings(category: str | None) -> None:
+    """DB에 저장된 설정 목록 (secret은 마스킹)."""
+    fkey = _get_fernet_key()
+    repo = SettingsRepository(db_path=_db_path(), fernet_key=fkey)
+    entries = repo.list_by_category(category) if category else repo.list_all()
+    if not entries:
+        click.echo("설정 없음.")
+        return
+    click.echo(f"{'category':<15} {'key':<30} {'value':<30}")
+    click.echo(f"{'-'*15} {'-'*30} {'-'*30}")
+    for e in entries:
+        val = repo.get(e.key) or ""
+        display = SettingsService.mask(val) if e.is_secret else val
+        click.echo(f"{e.category:<15} {e.key:<30} {display:<30}")
