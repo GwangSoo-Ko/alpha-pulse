@@ -13,8 +13,11 @@ export function JobProgress({
   const { data: job, error } = useJobStatus(jobId)
 
   useEffect(() => {
-    if (job?.status === "done" && job.result_ref) {
-      router.replace(`${redirectPath}/${job.result_ref.slice(0, 8)}`)
+    if (job?.status === "done" && job.result_ref && redirectPath) {
+      // result_ref가 uuid 형태면 slice, JSON이면 skip
+      if (/^[a-f0-9-]{8,}$/.test(job.result_ref)) {
+        router.replace(`${redirectPath}/${job.result_ref.slice(0, 8)}`)
+      }
     }
   }, [job, router, redirectPath])
 
