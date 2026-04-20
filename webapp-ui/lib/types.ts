@@ -77,3 +77,5 @@ export type Job = {
   started_at: number | null
   finished_at: number | null
 }
+
+export type Mode = "paper" | "live" | "backtest"
