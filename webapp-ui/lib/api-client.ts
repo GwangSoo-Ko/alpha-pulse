@@ -34,13 +34,14 @@ export async function apiFetch<T>(
       if (v !== undefined && v !== "") url.searchParams.set(k, v)
     }
   }
+  const { headers: initHeaders, searchParams: _sp, ...restInit } = init ?? {}
   const res = await fetch(url.toString(), {
+    ...restInit,
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
+      ...(initHeaders ?? {}),
     },
-    ...init,
   })
   const ct = res.headers.get("content-type") ?? ""
   const body = ct.includes("json") ? await res.json() : await res.text()
