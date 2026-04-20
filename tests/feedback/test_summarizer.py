@@ -1,8 +1,8 @@
-import json
 import pytest
-from alphapulse.feedback.summarizer import FeedbackSummarizer
+
 from alphapulse.core.storage.feedback import FeedbackStore
 from alphapulse.feedback.evaluator import FeedbackEvaluator
+from alphapulse.feedback.summarizer import FeedbackSummarizer
 
 
 @pytest.fixture

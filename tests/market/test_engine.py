@@ -1,7 +1,6 @@
 """시그널 엔진 및 스코어링 테스트"""
 
-import pytest
-from alphapulse.market.engine.scoring import normalize_score, calculate_weighted_score
+from alphapulse.market.engine.scoring import calculate_weighted_score, normalize_score
 
 
 class TestNormalizeScore:

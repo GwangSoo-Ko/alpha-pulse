@@ -1,5 +1,6 @@
+
 import pytest
-from pathlib import Path
+
 from alphapulse.content.reporter import ReportWriter
 
 
@@ -14,7 +15,6 @@ def test_generate_filename(writer):
     assert "경제" in fname
     assert fname.endswith(".md")
     # title part should be truncated to 50 chars
-    parts = fname.split("_", 2)  # date_time_rest
     assert len(fname) <= 120  # reasonable length
 
 
@@ -111,5 +111,5 @@ def test_save_with_source_tag(writer):
 
 def test_reports_dir_created(tmp_path):
     new_dir = tmp_path / "sub" / "reports"
-    writer = ReportWriter(reports_dir=str(new_dir))
+    ReportWriter(reports_dir=str(new_dir))
     assert new_dir.exists()

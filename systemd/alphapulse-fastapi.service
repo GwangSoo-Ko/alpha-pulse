@@ -1,0 +1,22 @@
+[Unit]
+Description=AlphaPulse FastAPI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=alphapulse
+WorkingDirectory=/opt/alphapulse
+EnvironmentFile=/opt/alphapulse/.env
+ExecStart=/opt/alphapulse/.venv/bin/uvicorn alphapulse.webapp.main:app \
+    --host 127.0.0.1 --port 8000 \
+    --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=5
+
+ProtectSystem=strict
+ReadWritePaths=/opt/alphapulse/data /opt/alphapulse/logs
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

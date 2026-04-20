@@ -5,7 +5,6 @@ import pytest
 from alphapulse.trading.core.models import PortfolioSnapshot, Position, Stock
 from alphapulse.trading.risk.limits import RiskAlert
 from alphapulse.trading.risk.report import RiskReport, RiskReportGenerator
-from alphapulse.trading.risk.stress_test import StressResult
 
 
 @pytest.fixture

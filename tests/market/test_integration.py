@@ -1,17 +1,15 @@
 """통합 테스트 - 전체 파이프라인 E2E"""
 
-import pytest
-from unittest.mock import patch, MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 from click.testing import CliRunner
 
 from alphapulse.cli import cli
-from alphapulse.market.engine.signal_engine import SignalEngine
-from alphapulse.market.engine.scoring import calculate_weighted_score
 from alphapulse.core.storage import DataCache, PulseHistory
-
+from alphapulse.market.engine.signal_engine import SignalEngine
 
 # --- Mock 데이터 ---
 

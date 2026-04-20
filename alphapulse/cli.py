@@ -1917,3 +1917,10 @@ def risk_limits():
     click.echo(f"드로다운 hard: {cfg.MAX_DRAWDOWN_HARD:.0%}")
     click.echo(f"일일 주문 한도: {cfg.MAX_DAILY_ORDERS}회")
     click.echo(f"일일 금액 한도: {cfg.MAX_DAILY_AMOUNT:,}원")
+
+
+# ── Webapp 서브커맨드 ────────────────────────────────────────────
+
+from alphapulse.webapp.cli import webapp as webapp_group  # noqa: E402
+
+cli.add_command(webapp_group)

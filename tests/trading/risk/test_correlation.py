@@ -6,7 +6,6 @@ import pytest
 
 from alphapulse.trading.core.models import PortfolioSnapshot, Position, Stock
 from alphapulse.trading.risk.correlation import CorrelationAnalyzer
-from alphapulse.trading.risk.limits import RiskAlert
 
 
 @pytest.fixture

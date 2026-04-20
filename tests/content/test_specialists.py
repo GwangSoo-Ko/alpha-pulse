@@ -1,10 +1,11 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
+
 from alphapulse.content.agents.specialists import (
-    SpecialistAnalyst,
+    SPECIALIST_CONFIGS,
     get_specialist,
     get_specialists_for_topics,
-    SPECIALIST_CONFIGS,
 )
 
 
