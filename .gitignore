@@ -7,6 +7,8 @@ build/
 data/
 !alphapulse/trading/data/
 !tests/trading/data/
+!webapp-ui/app/(dashboard)/data/
+!webapp-ui/components/domain/data/
 reports/
 *.log
 *.session
