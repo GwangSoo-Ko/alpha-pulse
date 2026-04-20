@@ -1,10 +1,14 @@
 import Link from "next/link"
 
-const ITEMS = [
-  { href: "/backtest", label: "Backtest" },
-  { href: "/portfolio", label: "Portfolio", disabled: true },
-  { href: "/risk", label: "Risk", disabled: true },
-  { href: "/market", label: "Market", disabled: true },
+const ITEMS: { href: string; label: string }[] = [
+  { href: "/", label: "홈" },
+  { href: "/portfolio", label: "포트폴리오" },
+  { href: "/risk", label: "리스크" },
+  { href: "/screening", label: "스크리닝" },
+  { href: "/backtest", label: "백테스트" },
+  { href: "/data", label: "데이터" },
+  { href: "/settings", label: "설정" },
+  { href: "/audit", label: "감사" },
 ]
 
 export function Sidebar() {
@@ -15,16 +19,10 @@ export function Sidebar() {
         {ITEMS.map((it) => (
           <Link
             key={it.href}
-            href={it.disabled ? "#" : it.href}
-            className={
-              "block rounded px-3 py-2 text-sm " +
-              (it.disabled
-                ? "cursor-not-allowed text-neutral-600"
-                : "hover:bg-neutral-800")
-            }
+            href={it.href}
+            className="block rounded px-3 py-2 text-sm hover:bg-neutral-800"
           >
             {it.label}
-            {it.disabled && <span className="ml-2 text-xs">(soon)</span>}
           </Link>
         ))}
       </nav>
