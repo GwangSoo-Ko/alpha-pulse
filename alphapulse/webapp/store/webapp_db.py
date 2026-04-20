@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS settings (
     FOREIGN KEY (updated_by) REFERENCES users(id)
 );
 CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
+
+CREATE TABLE IF NOT EXISTS risk_report_cache (
+    snapshot_key TEXT PRIMARY KEY,
+    report_json TEXT NOT NULL,
+    stress_json TEXT,
+    computed_at REAL NOT NULL,
+    tenant_id INTEGER
+);
 """
 
 
