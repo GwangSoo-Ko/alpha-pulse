@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from alphapulse.core.config import Config
 from alphapulse.trading.core.audit import AuditLogger
@@ -107,6 +107,11 @@ def create_app(
     @app.get("/api/v1/health")
     async def health():
         return {"status": "ok"}
+
+    @app.get("/api/v1/csrf-token")
+    async def csrf_token(request: Request):
+        """CSRF 토큰 발급 — CSRFMiddleware가 쿠키를 세팅하고 body를 반환."""
+        return {"token": request.state.csrf_token}
 
     app.include_router(auth_router)
     app.include_router(jobs_router)
