@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import { apiFetch } from "@/lib/api-client"
 import { StressTable } from "@/components/domain/risk/stress-table"
+import { CustomStressForm } from "@/components/domain/risk/custom-stress-form"
 
 export const dynamic = "force-dynamic"
 
@@ -20,6 +21,7 @@ export default async function StressPage({ searchParams }: Props) {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">스트레스 테스트 ({mode})</h1>
       <StressTable scenarios={data?.stress ?? {}} />
+      <CustomStressForm mode={mode} />
     </div>
   )
 }
