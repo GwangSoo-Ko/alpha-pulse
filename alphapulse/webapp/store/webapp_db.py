@@ -102,6 +102,23 @@ CREATE TABLE IF NOT EXISTS risk_report_cache (
     computed_at REAL NOT NULL,
     tenant_id INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS screening_runs (
+    run_id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    market TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    factor_weights TEXT NOT NULL,
+    top_n INTEGER NOT NULL,
+    market_context TEXT DEFAULT '{}',
+    results TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_screening_user
+    ON screening_runs(user_id, created_at DESC);
 """
 
 
