@@ -14,6 +14,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 @dataclass
 class WebAppConfig:
@@ -40,6 +42,9 @@ class WebAppConfig:
 
     @classmethod
     def from_env(cls) -> "WebAppConfig":
+        # .env 자동 로드 (alphapulse.core.Config와 동일 패턴)
+        base_dir = Path(__file__).resolve().parent.parent.parent
+        load_dotenv(base_dir / ".env")
         return cls(
             session_secret=os.environ["WEBAPP_SESSION_SECRET"],
             monitor_bot_token=os.environ.get(
