@@ -3,10 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-
-from fastapi import Request
 
 from alphapulse.webapp.api.settings import router as settings_router
 from alphapulse.webapp.auth.routes import router as auth_router

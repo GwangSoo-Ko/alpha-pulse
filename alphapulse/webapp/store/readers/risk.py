@@ -16,7 +16,6 @@ from alphapulse.webapp.store.readers.portfolio import (
     SnapshotDTO,
 )
 from alphapulse.webapp.store.risk_cache import (
-    CachedRiskReport,
     RiskReportCacheRepository,
 )
 

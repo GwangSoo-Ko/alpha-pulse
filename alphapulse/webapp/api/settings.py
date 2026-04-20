@@ -8,12 +8,11 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from alphapulse.webapp.auth.deps import get_current_user, require_role
+from alphapulse.webapp.auth.deps import require_role
 from alphapulse.webapp.auth.security import verify_password
 from alphapulse.webapp.services.settings_service import SettingsService
 from alphapulse.webapp.store.settings import SettingsRepository
 from alphapulse.webapp.store.users import User, UserRepository
-
 
 router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 

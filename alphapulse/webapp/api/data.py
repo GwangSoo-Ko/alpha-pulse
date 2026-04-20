@@ -20,7 +20,6 @@ from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
 from alphapulse.webapp.store.users import User
 
-
 router = APIRouter(prefix="/api/v1/data", tags=["data"])
 
 

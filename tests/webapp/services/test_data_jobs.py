@@ -1,8 +1,6 @@
 """Data Jobs — update/collect-* Job wrappers."""
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from alphapulse.webapp.services.data_jobs import (
     run_data_collect_financials,
     run_data_collect_short,
@@ -58,7 +56,7 @@ class TestDataJobs:
         }
         mock_cls.return_value = inst
         cb = MagicMock()
-        out = run_data_collect_wisereport(
+        run_data_collect_wisereport(
             market="KOSPI", top=100, progress_callback=cb,
         )
         assert inst.collect_static_batch.called

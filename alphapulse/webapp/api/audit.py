@@ -9,7 +9,6 @@ from alphapulse.webapp.auth.deps import require_role
 from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.users import User
 
-
 router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 
 
