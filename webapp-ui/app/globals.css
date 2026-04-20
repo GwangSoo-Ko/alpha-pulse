@@ -1,0 +1,8 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --background: 255 255 255; --foreground: 15 15 15; }
+.dark { --background: 10 10 10; --foreground: 240 240 240; }
+html { color-scheme: light dark; }
+body { @apply bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100; }
