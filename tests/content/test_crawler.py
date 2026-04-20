@@ -1,4 +1,5 @@
 import pytest
+
 from alphapulse.content.crawler import BlogCrawler
 
 

@@ -6,8 +6,6 @@ KIS API 및 Trading 관련 설정이 Config에 추가되었는지 검증한다.
 import os
 from unittest.mock import patch
 
-import pytest
-
 from alphapulse.core.config import Config
 
 

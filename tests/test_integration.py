@@ -1,8 +1,9 @@
 """AlphaPulse 통합 테스트 — 전체 파이프라인 E2E."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from click.testing import CliRunner
+
 from alphapulse.cli import cli
 
 

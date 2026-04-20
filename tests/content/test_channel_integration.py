@@ -1,10 +1,10 @@
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from datetime import datetime
-from pathlib import Path
-from alphapulse.content.aggregator import MessageAggregator
-from alphapulse.content.channel_monitor import TelegramChannelMonitor
 import asyncio
+from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from alphapulse.content.channel_monitor import TelegramChannelMonitor
 
 
 @pytest.mark.asyncio

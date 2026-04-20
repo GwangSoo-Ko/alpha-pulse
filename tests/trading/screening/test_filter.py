@@ -1,5 +1,6 @@
 """투자 제외 필터 테스트."""
 import pytest
+
 from alphapulse.trading.core.models import Stock
 from alphapulse.trading.screening.filter import StockFilter
 

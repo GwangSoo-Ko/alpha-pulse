@@ -1,6 +1,7 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-import json
-from unittest.mock import patch, MagicMock
+
 from alphapulse.content.detector import PostDetector
 
 

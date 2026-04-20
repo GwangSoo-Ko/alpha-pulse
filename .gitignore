@@ -14,3 +14,4 @@ reports/
 .coverage
 htmlcov/
 .superpowers/
+.serena/

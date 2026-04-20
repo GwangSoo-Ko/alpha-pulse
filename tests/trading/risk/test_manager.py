@@ -1,13 +1,12 @@
 """RiskManager 통합 테스트."""
 
-from unittest.mock import MagicMock
 
 import pytest
 
-from alphapulse.trading.core.enums import DrawdownAction, RiskAction, Side
+from alphapulse.trading.core.enums import RiskAction, Side
 from alphapulse.trading.core.models import Order, PortfolioSnapshot, Position, Stock
 from alphapulse.trading.risk.drawdown import DrawdownManager
-from alphapulse.trading.risk.limits import RiskDecision, RiskLimits
+from alphapulse.trading.risk.limits import RiskLimits
 from alphapulse.trading.risk.manager import RiskManager
 from alphapulse.trading.risk.var import VaRCalculator
 

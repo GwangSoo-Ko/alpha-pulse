@@ -1,6 +1,5 @@
 """StrategyAllocator 테스트."""
 
-import pytest
 
 from alphapulse.trading.core.models import StrategySynthesis
 from alphapulse.trading.strategy.allocator import StrategyAllocator

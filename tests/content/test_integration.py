@@ -1,6 +1,7 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
-from pathlib import Path
+
 from alphapulse.content.monitor import BlogMonitor
 
 

@@ -1,5 +1,4 @@
 """JobRepository 테스트."""
-import json
 import time
 import uuid
 

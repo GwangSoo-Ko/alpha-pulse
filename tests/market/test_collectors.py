@@ -3,16 +3,16 @@
 외부 API 호출을 모킹하여 각 수집기의 로직을 검증한다.
 """
 
-import pandas as pd
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+import pytest
+
 from alphapulse.market.collectors.base import BaseCollector, retry
-from alphapulse.market.collectors.pykrx_collector import PykrxCollector
 from alphapulse.market.collectors.fdr_collector import FdrCollector, _to_dash_date
 from alphapulse.market.collectors.fred_collector import FredCollector
 from alphapulse.market.collectors.krx_scraper import KrxScraper
-
+from alphapulse.market.collectors.pykrx_collector import PykrxCollector
 
 # ---------------------------------------------------------------------------
 # retry 데코레이터 테스트

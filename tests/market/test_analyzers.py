@@ -1,12 +1,12 @@
 """분석기 모듈 테스트"""
-import pytest
 import pandas as pd
-import numpy as np
-from alphapulse.market.analyzers.investor_flow import InvestorFlowAnalyzer
-from alphapulse.market.analyzers.program_trade import ProgramTradeAnalyzer
-from alphapulse.market.analyzers.market_breadth import MarketBreadthAnalyzer
+import pytest
+
 from alphapulse.market.analyzers.fund_flow import FundFlowAnalyzer
+from alphapulse.market.analyzers.investor_flow import InvestorFlowAnalyzer
 from alphapulse.market.analyzers.macro_monitor import MacroMonitorAnalyzer
+from alphapulse.market.analyzers.market_breadth import MarketBreadthAnalyzer
+from alphapulse.market.analyzers.program_trade import ProgramTradeAnalyzer
 
 
 @pytest.fixture

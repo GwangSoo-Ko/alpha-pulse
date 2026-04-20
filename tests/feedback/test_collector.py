@@ -1,5 +1,7 @@
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
+
 from alphapulse.feedback.collector import FeedbackCollector
 
 

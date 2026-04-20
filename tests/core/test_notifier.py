@@ -1,6 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from pathlib import Path
+
 from alphapulse.core.notifier import TelegramNotifier
 
 

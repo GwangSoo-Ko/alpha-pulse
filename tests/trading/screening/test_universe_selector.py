@@ -1,5 +1,6 @@
 """전략별 유니버스 선택 테스트."""
 import pytest
+
 from alphapulse.trading.core.models import Stock
 from alphapulse.trading.screening.universe_selector import UniverseSelector
 

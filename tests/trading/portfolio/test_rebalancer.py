@@ -3,7 +3,7 @@
 import pytest
 
 from alphapulse.trading.core.enums import Side
-from alphapulse.trading.core.models import Order, PortfolioSnapshot, Position, Stock
+from alphapulse.trading.core.models import PortfolioSnapshot, Position, Stock
 from alphapulse.trading.portfolio.rebalancer import Rebalancer
 
 

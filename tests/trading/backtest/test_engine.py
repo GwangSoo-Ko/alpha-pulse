@@ -2,14 +2,13 @@
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from alphapulse.trading.backtest.data_feed import HistoricalDataFeed
 from alphapulse.trading.backtest.engine import BacktestConfig, BacktestEngine, BacktestResult
 from alphapulse.trading.core.cost_model import CostModel
 from alphapulse.trading.core.enums import Side
-from alphapulse.trading.core.models import OHLCV, Order, PortfolioSnapshot, Signal, Stock
+from alphapulse.trading.core.models import OHLCV, Order, Signal, Stock
 
 
 @pytest.fixture

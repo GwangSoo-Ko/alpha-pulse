@@ -3,8 +3,7 @@
 KISClient는 mock으로 처리한다. AuditLogger도 mock.
 """
 
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

@@ -3,7 +3,6 @@
 import pytest
 
 from alphapulse.trading.core.enums import RebalanceFreq
-from alphapulse.trading.core.models import Signal, Stock
 from alphapulse.trading.strategy.base import BaseStrategy
 from alphapulse.trading.strategy.registry import StrategyRegistry
 

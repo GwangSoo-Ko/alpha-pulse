@@ -1,6 +1,5 @@
 """BacktestReport 테스트 — 터미널 + HTML 출력."""
 
-import os
 
 import pytest
 

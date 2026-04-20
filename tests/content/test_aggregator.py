@@ -1,6 +1,8 @@
-import pytest
 import asyncio
 from datetime import datetime
+
+import pytest
+
 from alphapulse.content.aggregator import MessageAggregator
 
 

@@ -1,6 +1,7 @@
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock, PropertyMock
-from datetime import datetime
+
 from alphapulse.content.channel_monitor import TelegramChannelMonitor
 
 

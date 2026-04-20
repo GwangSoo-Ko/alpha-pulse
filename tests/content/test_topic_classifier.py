@@ -1,7 +1,8 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
-import json
-from unittest.mock import patch, AsyncMock, MagicMock
-from alphapulse.content.agents.topic_classifier import TopicClassifier, VALID_TOPICS
+
+from alphapulse.content.agents.topic_classifier import VALID_TOPICS, TopicClassifier
 
 
 def test_valid_topics_defined():

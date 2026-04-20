@@ -1,5 +1,4 @@
 """JobRunner 테스트."""
-import asyncio
 import uuid
 
 import pytest

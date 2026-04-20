@@ -8,10 +8,8 @@ from alphapulse.trading.core.enums import Side
 from alphapulse.trading.core.models import (
     Order,
     PortfolioSnapshot,
-    Position,
     Signal,
     Stock,
-    StrategySynthesis,
 )
 from alphapulse.trading.portfolio.manager import PortfolioManager
 from alphapulse.trading.portfolio.models import TargetPortfolio
