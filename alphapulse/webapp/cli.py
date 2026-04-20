@@ -134,6 +134,30 @@ def verify_monitoring() -> None:
     click.echo("Test message sent. Check your monitoring channel.")
 
 
+# === Task 16: import-env 화이트리스트 ===
+
+_IMPORT_WHITELIST: dict[str, tuple[str, bool]] = {
+    # (category, is_secret)
+    "KIS_APP_KEY": ("api_key", True),
+    "KIS_APP_SECRET": ("api_key", True),
+    "KIS_ACCOUNT_NO": ("api_key", True),
+    "GEMINI_API_KEY": ("api_key", True),
+    "TELEGRAM_BOT_TOKEN": ("notification", True),
+    "TELEGRAM_CHANNEL_ID": ("notification", True),
+    "TELEGRAM_MONITOR_BOT_TOKEN": ("notification", True),
+    "TELEGRAM_MONITOR_CHANNEL_ID": ("notification", True),
+    "MAX_POSITION_WEIGHT": ("risk_limit", False),
+    "MAX_DRAWDOWN_SOFT": ("risk_limit", False),
+    "MAX_DRAWDOWN_HARD": ("risk_limit", False),
+    "MAX_DAILY_ORDERS": ("risk_limit", False),
+    "MAX_DAILY_AMOUNT": ("risk_limit", False),
+    "BACKTEST_COMMISSION": ("backtest", False),
+    "BACKTEST_TAX": ("backtest", False),
+    "BACKTEST_INITIAL_CAPITAL": ("backtest", False),
+    "STRATEGY_ALLOCATIONS": ("backtest", False),
+}
+
+
 # === Task 15: settings 관련 명령 ===
 
 
@@ -214,3 +238,35 @@ def list_settings(category: str | None) -> None:
         val = repo.get(e.key) or ""
         display = SettingsService.mask(val) if e.is_secret else val
         click.echo(f"{e.category:<15} {e.key:<30} {display:<30}")
+
+
+@webapp.command("import-env")
+@click.option("--dry-run", is_flag=True, help="실제 쓰기 없이 변경 목록만 출력")
+def import_env(dry_run: bool) -> None:
+    """화이트리스트 키를 .env → DB로 이관. 이미 DB에 있으면 skip."""
+    fkey = _get_fernet_key()
+    repo = SettingsRepository(db_path=_db_path(), fernet_key=fkey)
+    existing_keys = {e.key for e in repo.list_all()}
+
+    to_import: list[tuple[str, str, str, bool]] = []
+    for env_key, (category, is_secret) in _IMPORT_WHITELIST.items():
+        val = os.environ.get(env_key)
+        if val is None or not val.strip():
+            continue
+        if env_key in existing_keys:
+            continue
+        to_import.append((env_key, val, category, is_secret))
+
+    if dry_run:
+        click.echo(f"[dry-run] {len(to_import)} 키 이관 예정:")
+        for k, _, cat, _ in to_import:
+            click.echo(f"  {cat:<15} {k}")
+        return
+
+    for k, v, cat, secret in to_import:
+        repo.set(
+            key=k, value=v,
+            is_secret=secret, category=cat, user_id=0,
+        )
+
+    click.echo(f"Imported {len(to_import)} settings from .env.")

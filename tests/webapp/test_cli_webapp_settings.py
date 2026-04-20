@@ -62,3 +62,50 @@ def test_rotate_encrypt_key(tmp_path, monkeypatch):
     )
     assert r.exit_code == 0
     assert "Rotated" in r.output
+
+
+def test_import_env_dry_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEBAPP_SESSION_SECRET", "x" * 32)
+    monkeypatch.setenv("WEBAPP_DB_PATH", str(tmp_path / "webapp.db"))
+    fk = Fernet.generate_key().decode("utf-8")
+    monkeypatch.setenv("WEBAPP_ENCRYPT_KEY", fk)
+    monkeypatch.setenv("KIS_APP_KEY", "fake-key")
+    r = CliRunner().invoke(cli, ["webapp", "import-env", "--dry-run"])
+    assert r.exit_code == 0
+    assert "KIS_APP_KEY" in r.output
+
+
+def test_import_env_actual(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEBAPP_SESSION_SECRET", "x" * 32)
+    monkeypatch.setenv("WEBAPP_DB_PATH", str(tmp_path / "webapp.db"))
+    fk = Fernet.generate_key().decode("utf-8")
+    monkeypatch.setenv("WEBAPP_ENCRYPT_KEY", fk)
+    monkeypatch.setenv("KIS_APP_KEY", "fake-key")
+    monkeypatch.setenv("MAX_POSITION_WEIGHT", "0.15")
+    r = CliRunner().invoke(cli, ["webapp", "import-env"])
+    assert r.exit_code == 0
+    # list로 확인
+    r2 = CliRunner().invoke(cli, ["webapp", "list"])
+    assert "KIS_APP_KEY" in r2.output
+    assert "MAX_POSITION_WEIGHT" in r2.output
+
+
+def test_import_env_skips_existing(tmp_path, monkeypatch):
+    monkeypatch.setenv("WEBAPP_SESSION_SECRET", "x" * 32)
+    monkeypatch.setenv("WEBAPP_DB_PATH", str(tmp_path / "webapp.db"))
+    fk = Fernet.generate_key().decode("utf-8")
+    monkeypatch.setenv("WEBAPP_ENCRYPT_KEY", fk)
+    monkeypatch.setenv("KIS_APP_KEY", "from-env")
+    # seed DB with different value
+    CliRunner().invoke(cli, [
+        "webapp", "set", "--key", "KIS_APP_KEY", "--value", "from-db",
+        "--category", "api_key", "--secret",
+    ])
+    CliRunner().invoke(cli, ["webapp", "import-env"])
+    # DB 값 유지 확인
+    from alphapulse.webapp.store.settings import SettingsRepository
+    repo = SettingsRepository(
+        db_path=tmp_path / "webapp.db",
+        fernet_key=fk.encode("utf-8"),
+    )
+    assert repo.get("KIS_APP_KEY") == "from-db"
