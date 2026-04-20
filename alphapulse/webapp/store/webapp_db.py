@@ -82,6 +82,18 @@ CREATE TABLE IF NOT EXISTS alert_log (
 );
 CREATE INDEX IF NOT EXISTS idx_alert_log_title
     ON alert_log(title, last_sent_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_encrypted TEXT NOT NULL,
+    is_secret INTEGER NOT NULL DEFAULT 0,
+    category TEXT NOT NULL,
+    tenant_id INTEGER,
+    updated_at REAL NOT NULL,
+    updated_by INTEGER,
+    FOREIGN KEY (updated_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 """
 
 
