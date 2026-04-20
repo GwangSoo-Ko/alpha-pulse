@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,13 @@ from fastapi import FastAPI, Request
 
 from alphapulse.core.config import Config
 from alphapulse.trading.core.audit import AuditLogger
+from alphapulse.webapp.api.audit import router as audit_router
 from alphapulse.webapp.api.backtest import router as backtest_router
+from alphapulse.webapp.api.dashboard import router as dashboard_router
+from alphapulse.webapp.api.data import router as data_router
+from alphapulse.webapp.api.portfolio import router as portfolio_router
+from alphapulse.webapp.api.risk import router as risk_router
+from alphapulse.webapp.api.screening import router as screening_router
 from alphapulse.webapp.auth.routes import router as auth_router
 from alphapulse.webapp.config import WebAppConfig
 from alphapulse.webapp.jobs.routes import router as jobs_router
@@ -24,7 +31,13 @@ from alphapulse.webapp.notifier import MonitorNotifier
 from alphapulse.webapp.store.alert_log import AlertLogRepository
 from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.login_attempts import LoginAttemptsRepository
+from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.backtest import BacktestReader
+from alphapulse.webapp.store.readers.data_status import DataStatusReader
+from alphapulse.webapp.store.readers.portfolio import PortfolioReader
+from alphapulse.webapp.store.readers.risk import RiskReader
+from alphapulse.webapp.store.risk_cache import RiskReportCacheRepository
+from alphapulse.webapp.store.screening import ScreeningRepository
 from alphapulse.webapp.store.sessions import SessionRepository
 from alphapulse.webapp.store.users import UserRepository
 from alphapulse.webapp.store.webapp_db import init_webapp_db
@@ -65,8 +78,37 @@ def create_app(
     job_runner = JobRunner(job_repo=jobs)
     bt_reader = BacktestReader(db_path=resolved_backtest_db)
 
+    # Phase 2: readers / services
+    audit_db = db_path.with_suffix(".audit.db")
+    trading_db = Path(core.DATA_DIR) / "trading.db"
+
+    portfolio_reader = PortfolioReader(db_path=db_path)
+    risk_cache = RiskReportCacheRepository(db_path=db_path)
+    risk_reader = RiskReader(portfolio_reader=portfolio_reader, cache=risk_cache)
+    screening_repo = ScreeningRepository(db_path=db_path)
+    data_status_reader = DataStatusReader(trading_db_path=trading_db)
+    audit_reader = AuditReader(db_path=audit_db)
+
+    # Settings — conditional on WEBAPP_ENCRYPT_KEY being present
+    encrypt_key = os.environ.get("WEBAPP_ENCRYPT_KEY", cfg.encrypt_key)
+    settings_repo = None
+    settings_service = None
+    if encrypt_key:
+        from alphapulse.webapp.services.settings_service import SettingsService
+        from alphapulse.webapp.store.settings import SettingsRepository
+
+        fernet_key = (
+            encrypt_key.encode()
+            if isinstance(encrypt_key, str)
+            else encrypt_key
+        )
+        settings_repo = SettingsRepository(db_path=db_path, fernet_key=fernet_key)
+        settings_service = SettingsService(repo=settings_repo)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if settings_service is not None:
+            settings_service.load_env_overrides()
         n = recover_orphans(job_repo=jobs)
         if n:
             logger.warning("recovered %d orphan jobs", n)
@@ -99,7 +141,17 @@ def create_app(
     app.state.backtest_reader = bt_reader
     app.state.alert_log = alert_log
     app.state.monitor = monitor
-    app.state.audit = AuditLogger(db_path=db_path.with_suffix(".audit.db"))
+    app.state.audit = AuditLogger(db_path=audit_db)
+
+    # Phase 2 state
+    app.state.portfolio_reader = portfolio_reader
+    app.state.risk_cache = risk_cache
+    app.state.risk_reader = risk_reader
+    app.state.screening_repo = screening_repo
+    app.state.data_status_reader = data_status_reader
+    app.state.audit_reader = audit_reader
+    app.state.settings_repo = settings_repo
+    app.state.settings_service = settings_service
 
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(CSRFMiddleware, secret=cfg.session_secret)
@@ -116,6 +168,18 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(jobs_router)
     app.include_router(backtest_router)
+
+    # Phase 2 routers
+    app.include_router(portfolio_router)
+    app.include_router(risk_router)
+    app.include_router(screening_router)
+    app.include_router(data_router)
+    app.include_router(audit_router)
+    app.include_router(dashboard_router)
+    if settings_service is not None:
+        from alphapulse.webapp.api.settings import router as settings_router
+
+        app.include_router(settings_router)
 
     return app
 
