@@ -102,7 +102,7 @@ async def get_run(
     user: User = Depends(get_current_user),
     repo: ScreeningRepository = Depends(get_repo),
 ):
-    run = repo.get(run_id)
+    run = repo.resolve(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     if run.user_id != user.id and user.role != "admin":
@@ -166,15 +166,15 @@ async def delete_run(
     user: User = Depends(require_role("admin")),
     repo: ScreeningRepository = Depends(get_repo),
 ):
-    run = repo.get(run_id)
+    run = repo.resolve(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    repo.delete(run_id)
+    repo.delete(run.run_id)
     try:
         request.app.state.audit.log(
             "webapp.screening.delete",
             component="webapp",
-            data={"user_id": user.id, "run_id": run_id},
+            data={"user_id": user.id, "run_id": run.run_id},
             mode="live",
         )
     except AttributeError:

@@ -95,6 +95,19 @@ class ScreeningRepository:
             ).fetchone()
         return _row_to_run(row) if row else None
 
+    def resolve(self, run_id_or_prefix: str) -> ScreeningRun | None:
+        """전체 UUID 또는 접두사로 ScreeningRun 조회."""
+        exact = self.get(run_id_or_prefix)
+        if exact is not None:
+            return exact
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM screening_runs WHERE run_id LIKE ? LIMIT 1",
+                (f"{run_id_or_prefix}%",),
+            ).fetchone()
+        return _row_to_run(row) if row else None
+
     def list_for_user(
         self, user_id: int, page: int = 1, size: int = 20,
     ) -> Page:
