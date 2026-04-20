@@ -3,8 +3,11 @@ import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
 import { ApiError, apiFetch } from "@/lib/api-client"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MetricsCards } from "@/components/domain/backtest/metrics-cards"
 import { EquityCurve } from "@/components/charts/equity-curve"
+import { Drawdown } from "@/components/charts/drawdown"
+import { MonthlyHeatmap } from "@/components/charts/monthly-heatmap"
 import type { RunDetail, Snapshot } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
@@ -60,10 +63,22 @@ export default async function BacktestDetailPage({ params }: Props) {
         </div>
       </div>
       <MetricsCards metrics={run.metrics} />
-      <div className="rounded-lg border border-neutral-800 p-4">
-        <h2 className="mb-4 text-lg font-medium">자산 곡선</h2>
-        <EquityCurve snapshots={snaps} initialCapital={run.initial_capital} />
-      </div>
+      <Tabs defaultValue="equity">
+        <TabsList>
+          <TabsTrigger value="equity">자산 곡선</TabsTrigger>
+          <TabsTrigger value="drawdown">드로다운</TabsTrigger>
+          <TabsTrigger value="monthly">월별 수익률</TabsTrigger>
+        </TabsList>
+        <TabsContent value="equity" className="rounded-lg border border-neutral-800 p-4">
+          <EquityCurve snapshots={snaps} initialCapital={run.initial_capital} />
+        </TabsContent>
+        <TabsContent value="drawdown" className="rounded-lg border border-neutral-800 p-4">
+          <Drawdown snapshots={snaps} />
+        </TabsContent>
+        <TabsContent value="monthly" className="rounded-lg border border-neutral-800 p-4">
+          <MonthlyHeatmap snapshots={snaps} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
