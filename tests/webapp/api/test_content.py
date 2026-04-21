@@ -200,3 +200,51 @@ def test_detail_requires_auth(app):
     c = TestClient(app, base_url="https://testserver")
     r = c.get("/api/v1/content/reports/anything.md")
     assert r.status_code == 401
+
+
+def test_run_creates_job_and_returns_id(client, monkeypatch):
+    """POST /monitor/run → BackgroundTasks 스케줄, reused=false."""
+    async def fake_runner_run(self, job_id, func, **kwargs):
+        pass
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", fake_runner_run,
+    )
+
+    r = client.post("/api/v1/content/monitor/run", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reused"] is False
+    assert "job_id" in body
+
+
+def test_run_reuses_existing_job(client, app, monkeypatch):
+    """같은 kind 의 running Job 있으면 그 id 반환, reused=true."""
+    app.state.jobs.create(
+        job_id="existing", kind="content_monitor",
+        params={}, user_id=1,
+    )
+    app.state.jobs.update_status("existing", "running")
+
+    async def fake_runner_run(self, job_id, func, **kwargs):
+        raise AssertionError("should not be called")
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", fake_runner_run,
+    )
+
+    r = client.post("/api/v1/content/monitor/run", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["job_id"] == "existing"
+    assert body["reused"] is True
+
+
+def test_run_audit_log(client, app, monkeypatch):
+    async def noop(self, *a, **kw):
+        pass
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", noop,
+    )
+    r = client.post("/api/v1/content/monitor/run", json={})
+    assert r.status_code == 200
+    assert app.state.audit.log.called
+    assert app.state.audit.log.call_args.args[0] == "webapp.content.monitor.run"

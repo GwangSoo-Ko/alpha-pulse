@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 
 from alphapulse.webapp.auth.deps import get_current_user
+from alphapulse.webapp.jobs.runner import JobRunner
+from alphapulse.webapp.services.content_runner import run_content_monitor_async
 from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.readers.content import ContentReader
 from alphapulse.webapp.store.users import User
@@ -57,6 +61,10 @@ def get_content_reader(request: Request) -> ContentReader:
 
 def get_jobs(request: Request) -> JobRepository:
     return request.app.state.jobs
+
+
+def get_runner(request: Request) -> JobRunner:
+    return request.app.state.job_runner
 
 
 def _validate_filename(name: str) -> str:
@@ -111,3 +119,42 @@ async def get_report(
     if detail is None:
         raise HTTPException(404, "Report not found")
     return ReportDetail(**detail)
+
+
+@router.post("/monitor/run", response_model=MonitorRunResponse)
+async def run_monitor(
+    body: MonitorRunRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    jobs: JobRepository = Depends(get_jobs),
+    runner: JobRunner = Depends(get_runner),
+):
+    # 중복 running Job 감지 → 재사용 (kind 만으로 감지, 날짜 무관)
+    existing = jobs.find_running_by_kind("content_monitor")
+    if existing is not None:
+        return MonitorRunResponse(job_id=existing.id, reused=True)
+
+    job_id = str(uuid.uuid4())
+    jobs.create(
+        job_id=job_id, kind="content_monitor",
+        params={}, user_id=user.id,
+    )
+    try:
+        request.app.state.audit.log(
+            "webapp.content.monitor.run",
+            component="webapp",
+            data={"user_id": user.id, "job_id": job_id},
+            mode="live",
+        )
+    except AttributeError:
+        pass
+
+    async def _run():
+        await runner.run(
+            job_id,
+            run_content_monitor_async,
+        )
+
+    background_tasks.add_task(_run)
+    return MonitorRunResponse(job_id=job_id, reused=False)
