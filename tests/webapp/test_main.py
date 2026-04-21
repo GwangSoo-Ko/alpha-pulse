@@ -139,3 +139,22 @@ def test_pulse_history_on_state(env: Path):
     app = create_app(backtest_db_path=env / "backtest.db")
     assert hasattr(app.state, "pulse_history")
     assert app.state.pulse_history is not None
+
+
+def test_content_router_registered(env: Path):
+    """create_app 부팅 후 content 엔드포인트가 라우트에 등록된다."""
+    from alphapulse.webapp.main import create_app
+
+    app = create_app(backtest_db_path=env / "backtest.db")
+    routes = {r.path for r in app.routes}
+    assert "/api/v1/content/reports" in routes
+    assert "/api/v1/content/reports/{filename:path}" in routes
+    assert "/api/v1/content/monitor/run" in routes
+
+
+def test_content_reader_on_state(env: Path):
+    from alphapulse.webapp.main import create_app
+
+    app = create_app(backtest_db_path=env / "backtest.db")
+    assert hasattr(app.state, "content_reader")
+    assert app.state.content_reader is not None
