@@ -71,6 +71,7 @@ pytest tests/ --cov=alphapulse       # 커버리지
 - Trading System 가이드: `docs/trading-system-guide.md`
 - Trading System 설계: `docs/superpowers/specs/2026-04-09-trading-system-design.md`
 - Market Pulse 웹 대시보드 설계: `docs/superpowers/specs/2026-04-21-market-pulse-web-design.md`
+- Content 웹 대시보드 설계: `docs/superpowers/specs/2026-04-21-content-web-design.md`
 
 ## Custom Commands
 
