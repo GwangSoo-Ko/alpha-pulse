@@ -21,6 +21,20 @@ from alphapulse.market.engine.scoring import calculate_weighted_score
 logger = logging.getLogger(__name__)
 
 
+def extract_indicator_descriptions(
+    analyzer_results: dict,
+) -> dict[str, str | None]:
+    """analyzer 반환 dict 들에서 'details' 문자열만 추출.
+
+    각 값이 dict 가 아니거나 'details' 키가 없으면 None.
+    DataFrame 등 직렬화 불가 필드는 제외되므로 JSON 안전.
+    """
+    return {
+        k: (v.get("details") if isinstance(v, dict) else None)
+        for k, v in analyzer_results.items()
+    }
+
+
 class SignalEngine:
     """모든 분석기를 종합하여 Market Pulse Score 산출"""
 
@@ -326,6 +340,7 @@ class SignalEngine:
             }
             self.history.save(target_date, final_score, signal, {
                 "indicator_scores": serializable_scores,
+                "indicator_descriptions": extract_indicator_descriptions(details),
                 "period": period,
             })
         except Exception as e:
