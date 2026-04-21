@@ -10,6 +10,7 @@ data/
 !webapp-ui/app/(dashboard)/data/
 !webapp-ui/components/domain/data/
 reports/
+!webapp-ui/app/(dashboard)/content/reports/
 *.log
 *.session
 .pytest_cache/

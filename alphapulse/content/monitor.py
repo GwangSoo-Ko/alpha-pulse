@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import TypedDict
 
 from alphapulse.content.agents import AnalysisOrchestrator
 from alphapulse.content.category_filter import CategoryFilter
@@ -8,6 +9,13 @@ from alphapulse.content.detector import PostDetector
 from alphapulse.content.reporter import ReportWriter
 from alphapulse.core.config import Config
 from alphapulse.core.notifier import TelegramNotifier
+
+
+class RunOnceSummary(TypedDict):
+    processed: int
+    skipped: int
+    no_new: bool
+
 
 logger = logging.getLogger("alphapulse.content")
 
@@ -34,13 +42,20 @@ class BlogMonitor:
         )
         self.blog_id = blog_id
 
-    async def run_once(self, force_latest: int = 0, send_telegram: bool = True):
+    async def run_once(
+        self, force_latest: int = 0, send_telegram: bool = True
+    ) -> RunOnceSummary:
+        """신규 포스트 처리.
+
+        Returns:
+            요약 dict: {processed: int, skipped: int, no_new: bool}
+        """
         logger.info("모니터링 시작...")
         posts = self.detector.fetch_new_posts(force_latest=force_latest)
 
         if not posts:
             logger.info("새 글 없음")
-            return
+            return {"processed": 0, "skipped": 0, "no_new": True}
 
         logger.info(f"{len(posts)}개 새 글 발견")
         target_posts, skipped = self.category_filter.filter_posts(posts)
@@ -49,13 +64,16 @@ class BlogMonitor:
             logger.info("대상 카테고리 글 없음")
             for post in posts:
                 self.detector.mark_seen(post["id"])
-            return
+            return {"processed": 0, "skipped": len(skipped), "no_new": False}
 
         logger.info(f"대상 글 {len(target_posts)}개, 스킵 {len(skipped)}개")
 
+        processed = 0
         for post in target_posts:
             try:
-                await self._process_post(post, send_telegram=send_telegram)
+                ok = await self._process_post(post, send_telegram=send_telegram)
+                if ok:
+                    processed += 1
             except Exception as e:
                 logger.error(f'글 처리 실패 "{post["title"]}": {e}')
             finally:
@@ -63,6 +81,8 @@ class BlogMonitor:
 
         for post in skipped:
             self.detector.mark_seen(post["id"])
+
+        return {"processed": processed, "skipped": len(skipped), "no_new": False}
 
     async def _process_post(self, post: dict, send_telegram: bool = True) -> bool:
         logger.info(f'처리 중: "{post["title"]}"')

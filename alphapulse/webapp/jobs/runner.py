@@ -6,6 +6,7 @@ ARQ 호환 시그니처: future에서 `async def(ctx, *args)` worker로 이식 �
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from typing import Callable
@@ -35,7 +36,10 @@ class JobRunner:
 
         kwargs = {**kwargs, "progress_callback": _on_progress}
         try:
-            result = await asyncio.to_thread(func, *args, **kwargs)
+            if inspect.iscoroutinefunction(func):
+                result = await func(*args, **kwargs)
+            else:
+                result = await asyncio.to_thread(func, *args, **kwargs)
             self.jobs.update_status(
                 job_id, "done",
                 result_ref=str(result) if result is not None else None,

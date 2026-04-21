@@ -15,6 +15,7 @@ from alphapulse.core.storage import PulseHistory
 from alphapulse.trading.core.audit import AuditLogger
 from alphapulse.webapp.api.audit import router as audit_router
 from alphapulse.webapp.api.backtest import router as backtest_router
+from alphapulse.webapp.api.content import router as content_router
 from alphapulse.webapp.api.dashboard import router as dashboard_router
 from alphapulse.webapp.api.data import router as data_router
 from alphapulse.webapp.api.market import router as market_router
@@ -35,6 +36,7 @@ from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.login_attempts import LoginAttemptsRepository
 from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.backtest import BacktestReader
+from alphapulse.webapp.store.readers.content import ContentReader
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
 from alphapulse.webapp.store.readers.portfolio import PortfolioReader
 from alphapulse.webapp.store.readers.risk import RiskReader
@@ -91,6 +93,7 @@ def create_app(
     data_status_reader = DataStatusReader(trading_db_path=trading_db)
     audit_reader = AuditReader(db_path=audit_db)
     pulse_history = PulseHistory(db_path=core.HISTORY_DB)
+    content_reader = ContentReader(reports_dir=core.REPORTS_DIR)
 
     # Settings — conditional on WEBAPP_ENCRYPT_KEY being present
     encrypt_key = os.environ.get("WEBAPP_ENCRYPT_KEY", cfg.encrypt_key)
@@ -154,6 +157,7 @@ def create_app(
     app.state.data_status_reader = data_status_reader
     app.state.audit_reader = audit_reader
     app.state.pulse_history = pulse_history
+    app.state.content_reader = content_reader
     app.state.settings_repo = settings_repo
     app.state.settings_service = settings_service
 
@@ -181,6 +185,7 @@ def create_app(
     app.include_router(audit_router)
     app.include_router(dashboard_router)
     app.include_router(market_router)
+    app.include_router(content_router)
     if settings_service is not None:
         from alphapulse.webapp.api.settings import router as settings_router
 
