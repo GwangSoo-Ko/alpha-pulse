@@ -37,7 +37,11 @@ export function BacktestForm() {
       end: new Date().toISOString().slice(0, 10).replace(/-/g, ""),
     },
   })
-  const selectedStrategy = useWatch({ control, name: "strategy" })
+  const selectedStrategy = useWatch({
+    control,
+    name: "strategy",
+    defaultValue: "momentum",
+  })
   const strategyInfo = findBacktestStrategy(selectedStrategy)
 
   const onSubmit = async (data: FormData) => {
