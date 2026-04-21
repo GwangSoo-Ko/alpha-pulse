@@ -183,3 +183,20 @@ def test_list_requires_auth(app):
     c = TestClient(app, base_url="https://testserver")
     r = c.get("/api/v1/content/reports")
     assert r.status_code == 401
+
+
+def test_detail_rejects_backslash_in_name(client):
+    r = client.get("/api/v1/content/reports/sub%5Cfile.md")
+    assert r.status_code == 400
+
+
+def test_detail_rejects_null_byte_in_name(client):
+    r = client.get("/api/v1/content/reports/file%00.md")
+    assert r.status_code == 400
+
+
+def test_detail_requires_auth(app):
+    from fastapi.testclient import TestClient
+    c = TestClient(app, base_url="https://testserver")
+    r = c.get("/api/v1/content/reports/anything.md")
+    assert r.status_code == 401

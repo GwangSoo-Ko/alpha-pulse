@@ -60,7 +60,9 @@ def get_jobs(request: Request) -> JobRepository:
 
 
 def _validate_filename(name: str) -> str:
-    """경로 조작 차단 — .md 확장자, 슬래시/점점/숨김 금지."""
+    """경로 조작 차단 — .md 확장자, 슬래시/점점/숨김/null byte 금지."""
+    if "\x00" in name:
+        raise HTTPException(400, "Invalid filename — null byte not allowed")
     if not name.endswith(".md"):
         raise HTTPException(400, "Invalid filename — must end with .md")
     if "/" in name or "\\" in name or ".." in name or name.startswith("."):
