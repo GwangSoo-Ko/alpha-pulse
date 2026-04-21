@@ -69,7 +69,7 @@ def _meta_from_file(path: Path) -> ReportMeta:
     """파일에서 frontmatter 파싱. 실패 시 fallback."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError as e:
+    except (OSError, UnicodeError) as e:
         logger.warning("파일 읽기 실패 %s: %s", path, e)
         text = ""
     fm, _body = _parse_frontmatter(text)
@@ -165,7 +165,7 @@ class ContentReader:
             return None
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError as e:
+        except (OSError, UnicodeError) as e:
             logger.warning("파일 읽기 실패 %s: %s", path, e)
             return None
         fm, body = _parse_frontmatter(text)
