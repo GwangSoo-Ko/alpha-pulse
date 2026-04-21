@@ -112,3 +112,21 @@ class JobRepository:
                 (status,),
             ).fetchall()
         return [_row_to_job(r) for r in rows]
+
+    def find_running_by_kind_and_date(
+        self, kind: str, date: str,
+    ) -> Job | None:
+        """kind 와 params.date 가 일치하는 pending/running Job 을 1건 반환.
+
+        중복 실행 요청 방지용. 동일 날짜의 다른 Job 이 진행 중이면 그걸 재사용.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE kind = ? "
+                "AND status IN ('pending', 'running') "
+                "AND json_extract(params, '$.date') = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (kind, date),
+            ).fetchone()
+        return _row_to_job(row) if row else None
