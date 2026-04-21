@@ -132,3 +132,20 @@ class JobRepository:
                 (kind, date),
             ).fetchone()
         return _row_to_job(row) if row else None
+
+    def find_running_by_kind(self, kind: JobKind) -> Job | None:
+        """kind 가 일치하는 pending/running Job 을 1건 반환.
+
+        date 무관 중복 실행 방지용 (날짜 개념 없는 연속 스트림 Job).
+        동시 호출 시 이 메서드 → create 사이에 race window 가 존재하므로
+        호출부(API 레이어)에서 추가 보호가 필요할 수 있다.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM jobs WHERE kind = ? "
+                "AND status IN ('pending', 'running') "
+                "ORDER BY created_at DESC LIMIT 1",
+                (kind,),
+            ).fetchone()
+        return _row_to_job(row) if row else None
