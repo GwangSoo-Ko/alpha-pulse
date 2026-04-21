@@ -106,3 +106,53 @@ class TestBulkCollector:
         # 어제 날짜 (YYYYMMDD 형식)
         assert len(result) == 8
         assert result.isdigit()
+
+    def test_update_accepts_progress_callback_parameter(
+        self, collector, monkeypatch,
+    ):
+        """update() 에 progress_callback 파라미터가 추가되어 backward-compat."""
+        # _collect_stock_list 가 빈 리스트를 반환하여 phase 1 만 실행되고 종료
+        monkeypatch.setattr(collector, "_collect_stock_list", lambda m: [])
+        # 오늘 날짜를 미래로 세팅하여 증분 대상이 있다고 판단
+        monkeypatch.setattr(
+            collector, "_find_latest_trading_date", lambda: "20990101"
+        )
+        # 기존 last date 설정 → update 모드 진입
+        collector.metadata.set_last_date("KOSPI", "ohlcv", "20250101")
+
+        # None (backward-compat): 예외 없이 동작
+        collector.update(markets=["KOSPI"], progress_callback=None)
+
+        # 실제 callable: 예외 없이 동작
+        events = []
+        collector.update(
+            markets=["KOSPI"],
+            progress_callback=lambda p: events.append(p),
+        )
+
+    def test_update_emits_bulk_progress_events_for_phase_1(
+        self, collector, monkeypatch,
+    ):
+        """update() 가 최소 phase 1 (종목 목록) BulkProgress 이벤트를 emit 한다."""
+        from alphapulse.trading.data.bulk_collector import BulkProgress
+
+        # 빈 코드 → phase 1 시작 이벤트만 발생 후 종료
+        monkeypatch.setattr(collector, "_collect_stock_list", lambda m: [])
+        monkeypatch.setattr(
+            collector, "_find_latest_trading_date", lambda: "20990101"
+        )
+        collector.metadata.set_last_date("KOSPI", "ohlcv", "20250101")
+
+        events: list[BulkProgress] = []
+        collector.update(
+            markets=["KOSPI"],
+            progress_callback=lambda p: events.append(p),
+        )
+
+        # 최소 phase 1 시작 이벤트 1건 이상
+        assert len(events) >= 1
+        assert events[0].market == "KOSPI"
+        assert events[0].market_idx == 1
+        assert events[0].markets_total == 1
+        assert events[0].phase_idx == 1
+        assert events[0].phases_total == 5
