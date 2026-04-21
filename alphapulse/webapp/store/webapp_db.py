@@ -82,6 +82,43 @@ CREATE TABLE IF NOT EXISTS alert_log (
 );
 CREATE INDEX IF NOT EXISTS idx_alert_log_title
     ON alert_log(title, last_sent_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_encrypted TEXT NOT NULL,
+    is_secret INTEGER NOT NULL DEFAULT 0,
+    category TEXT NOT NULL,
+    tenant_id INTEGER,
+    updated_at REAL NOT NULL,
+    updated_by INTEGER,
+    FOREIGN KEY (updated_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
+
+CREATE TABLE IF NOT EXISTS risk_report_cache (
+    snapshot_key TEXT PRIMARY KEY,
+    report_json TEXT NOT NULL,
+    stress_json TEXT,
+    computed_at REAL NOT NULL,
+    tenant_id INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS screening_runs (
+    run_id TEXT PRIMARY KEY,
+    name TEXT DEFAULT '',
+    market TEXT NOT NULL,
+    strategy TEXT NOT NULL,
+    factor_weights TEXT NOT NULL,
+    top_n INTEGER NOT NULL,
+    market_context TEXT DEFAULT '{}',
+    results TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    tenant_id INTEGER,
+    created_at REAL NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_screening_user
+    ON screening_runs(user_id, created_at DESC);
 """
 
 

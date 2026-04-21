@@ -16,7 +16,8 @@ class TestInitWebAppDb:
             ).fetchall()
         names = {r[0] for r in rows}
         assert names == {
-            "users", "sessions", "jobs", "login_attempts", "alert_log",
+            "users", "sessions", "jobs", "login_attempts", "alert_log", "settings",
+            "risk_report_cache", "screening_runs",
         }
 
     def test_users_has_tenant_id_column(self, tmp_path):
@@ -51,3 +52,5 @@ class TestInitWebAppDb:
         assert "idx_users_email" in names
         assert "idx_sessions_expires" in names
         assert "idx_jobs_status" in names
+        assert "idx_settings_category" in names
+        assert "idx_screening_user" in names

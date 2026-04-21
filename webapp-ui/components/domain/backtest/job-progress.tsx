@@ -5,15 +5,21 @@ import { useJobStatus } from "@/hooks/use-job-status"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
-export function JobProgress({ jobId }: { jobId: string }) {
+export function JobProgress({
+  jobId,
+  redirectPath = "/backtest",
+}: { jobId: string; redirectPath?: string }) {
   const router = useRouter()
   const { data: job, error } = useJobStatus(jobId)
 
   useEffect(() => {
-    if (job?.status === "done" && job.result_ref) {
-      router.replace(`/backtest/${job.result_ref.slice(0, 8)}`)
+    if (job?.status === "done" && job.result_ref && redirectPath) {
+      // result_ref가 uuid 형태면 slice, JSON이면 skip
+      if (/^[a-f0-9-]{8,}$/.test(job.result_ref)) {
+        router.replace(`${redirectPath}/${job.result_ref.slice(0, 8)}`)
+      }
     }
-  }, [job, router])
+  }, [job, router, redirectPath])
 
   if (error) return <div className="text-red-400">오류: {String(error)}</div>
   if (!job) return <Card className="p-6">로딩 중...</Card>
