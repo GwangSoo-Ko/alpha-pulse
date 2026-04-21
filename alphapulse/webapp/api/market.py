@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 
+from alphapulse.core.config import Config
 from alphapulse.core.storage import PulseHistory
 from alphapulse.webapp.auth.deps import get_current_user
+from alphapulse.webapp.jobs.runner import JobRunner
+from alphapulse.webapp.services.market_runner import run_market_pulse_sync
 from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.users import User
 
@@ -48,6 +53,17 @@ def get_pulse_history(request: Request) -> PulseHistory:
 
 def get_jobs(request: Request) -> JobRepository:
     return request.app.state.jobs
+
+
+def get_runner(request: Request) -> JobRunner:
+    return request.app.state.job_runner
+
+
+def _resolve_target_date(date: str | None) -> str:
+    """None 이면 Config 의 직전 거래일 규칙으로 결정."""
+    if date:
+        return Config.parse_date(date)
+    return Config.get_prev_trading_day()
 
 
 def _row_to_snapshot(row: dict) -> PulseSnapshot:
@@ -116,3 +132,45 @@ async def get_pulse(
             detail=f"Pulse history not found for {date}",
         )
     return _row_to_snapshot(row)
+
+
+@router.post("/pulse/run", response_model=RunPulseResponse)
+async def run_pulse(
+    body: RunPulseRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    jobs: JobRepository = Depends(get_jobs),
+    runner: JobRunner = Depends(get_runner),
+):
+    target_date = _resolve_target_date(body.date)
+
+    # 중복 running Job 감지 → 재사용
+    existing = jobs.find_running_by_kind_and_date("market_pulse", target_date)
+    if existing is not None:
+        return RunPulseResponse(job_id=existing.id, reused=True)
+
+    job_id = str(uuid.uuid4())
+    jobs.create(
+        job_id=job_id, kind="market_pulse",
+        params={"date": target_date}, user_id=user.id,
+    )
+    try:
+        request.app.state.audit.log(
+            "webapp.market.pulse.run",
+            component="webapp",
+            data={"user_id": user.id, "job_id": job_id, "date": target_date},
+            mode="live",
+        )
+    except AttributeError:
+        pass
+
+    async def _run():
+        await runner.run(
+            job_id,
+            run_market_pulse_sync,
+            date=target_date,
+        )
+
+    background_tasks.add_task(_run)
+    return RunPulseResponse(job_id=job_id, reused=False)

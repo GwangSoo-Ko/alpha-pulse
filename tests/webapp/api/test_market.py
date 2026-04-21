@@ -67,6 +67,7 @@ def client(app):
         json={"email": "a@x.com", "password": "long-enough-pw!"},
         headers={"x-csrf-token": token},
     )
+    c.headers.update({"X-CSRF-Token": token})
     return c
 
 
@@ -177,3 +178,83 @@ def test_history_and_detail_require_auth(app):
     assert r1.status_code == 401
     r2 = c.get("/api/v1/market/pulse/20260420")
     assert r2.status_code == 401
+
+
+def test_run_creates_job_and_returns_id(client, monkeypatch):
+    """POST /run → BackgroundTasks 로 스케줄, reused=false."""
+    called: dict = {}
+
+    async def fake_runner_run(self, job_id, func, **kwargs):
+        called["job_id"] = job_id
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", fake_runner_run,
+    )
+
+    r = client.post("/api/v1/market/pulse/run", json={"date": "20260420"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reused"] is False
+    assert "job_id" in body
+
+
+def test_run_reuses_existing_job(client, app, monkeypatch):
+    """같은 date 의 running Job 있으면 그 id 반환, reused=true."""
+    # 기존 Job 수동 생성
+    app.state.jobs.create(
+        job_id="existing-job", kind="market_pulse",
+        params={"date": "20260420"}, user_id=1,
+    )
+    app.state.jobs.update_status("existing-job", "running")
+
+    async def fake_runner_run(self, job_id, func, **kwargs):
+        raise AssertionError("should not be called for reused job")
+
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", fake_runner_run,
+    )
+
+    r = client.post("/api/v1/market/pulse/run", json={"date": "20260420"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["job_id"] == "existing-job"
+    assert body["reused"] is True
+
+
+def test_run_with_null_date_resolves_via_helper(client, app, monkeypatch):
+    """date=None → _resolve_target_date 호출, 결과가 Job params.date 에 저장."""
+    monkeypatch.setattr(
+        "alphapulse.webapp.api.market._resolve_target_date",
+        lambda d: "20260420",
+    )
+
+    async def noop(self, *a, **kw):
+        pass
+
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", noop,
+    )
+
+    r = client.post("/api/v1/market/pulse/run", json={})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    # DB 에서 직접 params 확인
+    saved = app.state.jobs.get(job_id)
+    assert saved is not None
+    assert saved.params.get("date") == "20260420"
+
+
+def test_run_audit_log(client, app, monkeypatch):
+    """POST /run 시 audit.log 호출."""
+    async def noop(self, *a, **kw):
+        pass
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", noop,
+    )
+
+    r = client.post("/api/v1/market/pulse/run", json={"date": "20260420"})
+    assert r.status_code == 200
+    assert app.state.audit.log.called
+    call_args = app.state.audit.log.call_args
+    assert call_args.args[0] == "webapp.market.pulse.run"
