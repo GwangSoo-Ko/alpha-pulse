@@ -114,11 +114,13 @@ class JobRepository:
         return [_row_to_job(r) for r in rows]
 
     def find_running_by_kind_and_date(
-        self, kind: str, date: str,
+        self, kind: JobKind, date: str,
     ) -> Job | None:
         """kind 와 params.date 가 일치하는 pending/running Job 을 1건 반환.
 
         중복 실행 요청 방지용. 동일 날짜의 다른 Job 이 진행 중이면 그걸 재사용.
+        동시 호출 시 이 메서드 → create 사이에 race window 가 존재하므로
+        호출부(API 레이어)에서 추가 보호가 필요할 수 있다.
         """
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
