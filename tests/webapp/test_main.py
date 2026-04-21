@@ -118,3 +118,24 @@ def test_startup_recovers_orphans(env: Path):
     with client:  # lifespan 실행
         pass
     assert jobs.get(jid).status == "failed"
+
+
+def test_market_router_registered(env: Path):
+    """create_app 부팅 후 market 엔드포인트가 라우트에 등록된다."""
+    from alphapulse.webapp.main import create_app
+
+    app = create_app(backtest_db_path=env / "backtest.db")
+    routes = {r.path for r in app.routes}
+    assert "/api/v1/market/pulse/latest" in routes
+    assert "/api/v1/market/pulse/history" in routes
+    assert "/api/v1/market/pulse/{date}" in routes
+    assert "/api/v1/market/pulse/run" in routes
+
+
+def test_pulse_history_on_state(env: Path):
+    """app.state.pulse_history 가 PulseHistory 인스턴스로 세팅된다."""
+    from alphapulse.webapp.main import create_app
+
+    app = create_app(backtest_db_path=env / "backtest.db")
+    assert hasattr(app.state, "pulse_history")
+    assert app.state.pulse_history is not None
