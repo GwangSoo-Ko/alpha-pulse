@@ -28,7 +28,7 @@ def test_runs_blog_monitor_and_returns_summary():
     mock_monitor.run_once.assert_awaited_once_with(send_telegram=False)
 
     # 결과 문자열 포맷: "처리 2개, 스킵 1개"
-    assert "2" in result and "1" in result
+    assert result == "처리 2개, 스킵 1개"
     assert progress_calls[0] == (0, 1, "BlogPulse 모니터링 시작")
     assert progress_calls[-1][0] == 1 and progress_calls[-1][1] == 1
 

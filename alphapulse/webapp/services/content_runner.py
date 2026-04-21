@@ -28,7 +28,7 @@ async def run_content_monitor_async(
     progress_callback(0, 1, "BlogPulse 모니터링 시작")
     monitor = BlogMonitor()
     summary = await monitor.run_once(send_telegram=False)
-    if summary.get("no_new"):
+    if summary["no_new"]:
         text = "새 글 없음"
     else:
         text = f"처리 {summary['processed']}개, 스킵 {summary['skipped']}개"

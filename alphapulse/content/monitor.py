@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from typing import TypedDict
 
 from alphapulse.content.agents import AnalysisOrchestrator
 from alphapulse.content.category_filter import CategoryFilter
@@ -8,6 +9,13 @@ from alphapulse.content.detector import PostDetector
 from alphapulse.content.reporter import ReportWriter
 from alphapulse.core.config import Config
 from alphapulse.core.notifier import TelegramNotifier
+
+
+class RunOnceSummary(TypedDict):
+    processed: int
+    skipped: int
+    no_new: bool
+
 
 logger = logging.getLogger("alphapulse.content")
 
@@ -34,7 +42,9 @@ class BlogMonitor:
         )
         self.blog_id = blog_id
 
-    async def run_once(self, force_latest: int = 0, send_telegram: bool = True) -> dict:
+    async def run_once(
+        self, force_latest: int = 0, send_telegram: bool = True
+    ) -> RunOnceSummary:
         """신규 포스트 처리.
 
         Returns:

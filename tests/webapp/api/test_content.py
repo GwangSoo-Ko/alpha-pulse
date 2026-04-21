@@ -247,4 +247,9 @@ def test_run_audit_log(client, app, monkeypatch):
     r = client.post("/api/v1/content/monitor/run", json={})
     assert r.status_code == 200
     assert app.state.audit.log.called
-    assert app.state.audit.log.call_args.args[0] == "webapp.content.monitor.run"
+    call = app.state.audit.log.call_args
+    assert call.args[0] == "webapp.content.monitor.run"
+    # payload 안에 user_id, job_id 포함
+    data = call.kwargs.get("data", {})
+    assert "user_id" in data
+    assert "job_id" in data
