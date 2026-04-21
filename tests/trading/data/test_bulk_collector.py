@@ -156,3 +156,54 @@ class TestBulkCollector:
         assert events[0].markets_total == 1
         assert events[0].phase_idx == 1
         assert events[0].phases_total == 5
+
+    def test_collect_all_accepts_progress_callback_parameter(
+        self, collector, monkeypatch,
+    ):
+        """collect_all() 도 progress_callback 을 받아 BulkProgress 를 emit 한다."""
+        from alphapulse.trading.data.bulk_collector import BulkProgress
+
+        # 빈 코드 → phase 1 이벤트 후 종료
+        monkeypatch.setattr(collector, "_collect_stock_list", lambda m: [])
+        monkeypatch.setattr(
+            collector, "_find_latest_trading_date", lambda: "20990101"
+        )
+
+        # None (backward-compat): 기존 호출 시그니처도 유지됨
+        collector.collect_all(markets=["KOSPI"], resume=False)
+
+        events: list[BulkProgress] = []
+        collector.collect_all(
+            markets=["KOSPI"],
+            resume=False,
+            progress_callback=lambda p: events.append(p),
+        )
+
+        assert len(events) >= 1
+        assert events[0].market == "KOSPI"
+        assert events[0].market_idx == 1
+        assert events[0].markets_total == 1
+        assert events[0].phase_idx == 1
+        assert events[0].phases_total == 5
+
+    def test_update_passes_progress_callback_to_collect_all_on_fresh(
+        self, collector, monkeypatch,
+    ):
+        """last 없음 → collect_all 위임 시 progress_callback 도 전달된다."""
+        # last 가 None 이므로 update() → collect_all 폴백
+        captured = {}
+
+        def _fake_collect_all(
+            markets=None, years=None, resume=True, progress_callback=None,
+        ):
+            captured["progress_callback"] = progress_callback
+            captured["markets"] = markets
+            return []
+
+        monkeypatch.setattr(collector, "collect_all", _fake_collect_all)
+
+        cb = lambda p: None  # noqa: E731
+        collector.update(markets=["KOSPI"], progress_callback=cb)
+
+        assert captured["progress_callback"] is cb
+        assert captured["markets"] == ["KOSPI"]

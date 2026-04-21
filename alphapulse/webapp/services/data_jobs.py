@@ -99,27 +99,33 @@ def run_data_collect_financials(
     FundamentalCollector.collect() returns None; result is reported by market.
     Collector 내부 per-code progress_callback 을 Job UI 로 전달한다.
 
+    총 종목 수를 TradingStore 에서 미리 해석하여 실제 denominator 로 사용한다
+    (이전: counter[0]+1 을 total 로 사용 → 99.9% 에서 멈추는 것처럼 보이는 문제).
+
     Args:
         market: 대상 시장 (KOSPI / KOSDAQ).
-        top: 상위 종목 수 (collector 내부에서 전 종목 수집하므로 참고용).
+        top: 상위 종목 수 (collector 내부에서 전 종목 수집하므로 사용되지 않음).
         progress_callback: (current, total, text) 콜백.
 
     Returns:
         JSON 문자열 — {"market": ..., "status": "ok"}.
     """
     cfg = Config()
+    store = TradingStore(db_path=cfg.TRADING_DB_PATH)
+    stocks = store.get_all_stocks()
+    codes = [s["code"] for s in stocks if s["market"] == market]
+    total = len(codes) or 1
     collector = FundamentalCollector(db_path=cfg.TRADING_DB_PATH)
-    progress_callback(0, 1, f"{market} 재무제표 수집 시작")
+    progress_callback(0, total, f"{market} 재무제표 수집 시작 ({total}종목)")
     counter = [0]
 
     def _cb(code: str) -> None:
         counter[0] += 1
-        # 총 개수를 모르므로 current+1 을 total 로 사용 → UI 는 진행 중 표시
-        progress_callback(counter[0], counter[0] + 1, f"{market} · {code}")
+        progress_callback(counter[0], total, f"{market} · {code}")
 
     today = _today()
     collector.collect(date=today, market=market, progress_callback=_cb)
-    progress_callback(1, 1, "완료")
+    progress_callback(total, total, "완료")
     return json.dumps({"market": market, "status": "ok"}, ensure_ascii=False)
 
 

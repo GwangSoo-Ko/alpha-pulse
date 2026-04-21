@@ -101,6 +101,7 @@ class BulkCollector:
         markets: list[str] | None = None,
         years: int | None = None,
         resume: bool = True,
+        progress_callback: "Callable[[BulkProgress], None] | None" = None,
     ) -> list[CollectionResult]:
         """전종목 데이터를 일괄 수집한다.
 
@@ -108,6 +109,8 @@ class BulkCollector:
             markets: 대상 시장 목록. 기본 ["KOSPI", "KOSDAQ"].
             years: 수집 기간 (년). 기본 self.years.
             resume: 체크포인트에서 재개 여부.
+            progress_callback: 선택적 BulkProgress 이벤트 콜백.
+                None (기본) 이면 stderr 출력만 수행한다.
 
         Returns:
             시장별 수집 결과 리스트.
@@ -124,7 +127,8 @@ class BulkCollector:
 
         import sys
 
-        for market in markets:
+        markets_total = len(markets)
+        for market_idx, market in enumerate(markets, start=1):
             sys.stderr.write(
                 f"\n{'='*60}\n"
                 f"  {market} 수집 ({start} ~ {today}) | {years}년치\n"
@@ -133,12 +137,26 @@ class BulkCollector:
             t0 = _time.time()
 
             # 1. 종목 목록 수집
+            if progress_callback:
+                progress_callback(BulkProgress(
+                    market=market, market_idx=market_idx,
+                    markets_total=markets_total,
+                    phase_idx=1, phases_total=5, phase_label="종목 목록",
+                    current=0, total=1,
+                ))
             sys.stderr.write("\n  [1/5] 종목 목록 수집 중...\n")
             codes = self._collect_stock_list(market)
             if not codes:
                 sys.stderr.write(f"  -> {market} 종목 목록이 비어 있습니다.\n")
                 continue
             sys.stderr.write(f"  -> {len(codes)}종목 로드 완료\n")
+            if progress_callback:
+                progress_callback(BulkProgress(
+                    market=market, market_idx=market_idx,
+                    markets_total=markets_total,
+                    phase_idx=1, phases_total=5, phase_label="종목 목록",
+                    current=1, total=1, detail=f"{len(codes)}종목",
+                ))
 
             result = CollectionResult(market=market)
 
@@ -160,6 +178,16 @@ class BulkCollector:
                     tracker.advance(skipped=True)
                     tracker.checkpoint(code)
                     tracker.print_progress(code)
+                    if progress_callback:
+                        s2 = tracker.summary()
+                        progress_callback(BulkProgress(
+                            market=market, market_idx=market_idx,
+                            markets_total=markets_total,
+                            phase_idx=2, phases_total=5,
+                            phase_label="OHLCV",
+                            current=s2["completed"], total=len(codes),
+                            detail=code,
+                        ))
                     continue
 
                 ok = self.rate_limiter.call_safe(
@@ -168,6 +196,15 @@ class BulkCollector:
                 tracker.advance(skipped=(ok is None))
                 tracker.checkpoint(code)
                 tracker.print_progress(code)
+                if progress_callback:
+                    s2 = tracker.summary()
+                    progress_callback(BulkProgress(
+                        market=market, market_idx=market_idx,
+                        markets_total=markets_total,
+                        phase_idx=2, phases_total=5, phase_label="OHLCV",
+                        current=s2["completed"], total=len(codes),
+                        detail=code,
+                    ))
 
             tracker.print_summary()
             s = tracker.summary()
@@ -183,9 +220,24 @@ class BulkCollector:
             )
             fund_tracker.start()
 
-            def _fund_progress(code: str) -> None:
+            def _fund_progress(
+                code: str,
+                _market: str = market,
+                _market_idx: int = market_idx,
+                _markets_total: int = markets_total,
+                _codes_len: int = len(codes),
+            ) -> None:
                 fund_tracker.advance()
                 fund_tracker.print_progress(code)
+                if progress_callback:
+                    s3 = fund_tracker.summary()
+                    progress_callback(BulkProgress(
+                        market=_market, market_idx=_market_idx,
+                        markets_total=_markets_total,
+                        phase_idx=3, phases_total=5, phase_label="재무제표",
+                        current=s3["completed"], total=_codes_len,
+                        detail=code,
+                    ))
 
             try:
                 self.fundamental_collector.collect(
@@ -220,6 +272,14 @@ class BulkCollector:
             if up_to_date_codes:
                 flow_tracker.print_progress("")
 
+            if progress_callback:
+                progress_callback(BulkProgress(
+                    market=market, market_idx=market_idx,
+                    markets_total=markets_total,
+                    phase_idx=4, phases_total=5, phase_label="수급",
+                    current=len(up_to_date_codes), total=len(codes),
+                    detail="시작",
+                ))
             self._collect_flow_parallel(
                 needs_collect, start, today, flow_tracker, max_workers=5,
             )
@@ -227,6 +287,14 @@ class BulkCollector:
             flow_tracker.print_summary()
             result.flow_count = flow_tracker.summary()["completed"]
             flow_tracker.cleanup()
+            if progress_callback:
+                s4 = flow_tracker.summary()
+                progress_callback(BulkProgress(
+                    market=market, market_idx=market_idx,
+                    markets_total=markets_total,
+                    phase_idx=4, phases_total=5, phase_label="수급",
+                    current=s4["completed"], total=len(codes), detail="완료",
+                ))
 
             # 5. wisereport 정적 데이터 수집 (병렬)
             ws_tracker = ProgressTracker(
@@ -236,9 +304,24 @@ class BulkCollector:
             )
             ws_tracker.start()
 
-            def _ws_progress(code: str) -> None:
+            def _ws_progress(
+                code: str,
+                _market: str = market,
+                _market_idx: int = market_idx,
+                _markets_total: int = markets_total,
+                _codes_len: int = len(codes),
+            ) -> None:
                 ws_tracker.advance()
                 ws_tracker.print_progress(code)
+                if progress_callback:
+                    s5 = ws_tracker.summary()
+                    progress_callback(BulkProgress(
+                        market=_market, market_idx=_market_idx,
+                        markets_total=_markets_total,
+                        phase_idx=5, phases_total=5, phase_label="wisereport",
+                        current=s5["completed"], total=_codes_len,
+                        detail=code,
+                    ))
 
             try:
                 ws_results = self.wisereport_collector.collect_static_batch(
@@ -304,7 +387,13 @@ class BulkCollector:
                 sys.stderr.write(
                     f"\n{market}: 미수집 상태. collect_all 실행.\n"
                 )
-                results.extend(self.collect_all(markets=[market]))
+                # 주의: collect_all 은 자체 시장 enumerate 를 수행하므로
+                # market_idx=1, markets_total=1 로 리셋된다. 원래 update()
+                # 호출 시의 markets 리스트 번호와 일치하지 않을 수 있어
+                # UI 진행률 바가 해당 시장에서 시각적으로 리셋될 수 있음.
+                results.extend(self.collect_all(
+                    markets=[market], progress_callback=progress_callback,
+                ))
                 continue
 
             last_dt = datetime.strptime(last, "%Y%m%d")

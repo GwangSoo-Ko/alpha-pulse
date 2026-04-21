@@ -35,10 +35,18 @@ class TestDataJobs:
         assert "KOSPI" in result_json
 
     @patch("alphapulse.webapp.services.data_jobs.FundamentalCollector")
-    def test_collect_financials(self, mock_cls):
+    @patch("alphapulse.webapp.services.data_jobs.TradingStore")
+    def test_collect_financials(self, mock_store_cls, mock_cls):
         inst = MagicMock()
         inst.collect.return_value = None  # actual return type is None
         mock_cls.return_value = inst
+
+        store_inst = MagicMock()
+        store_inst.get_all_stocks.return_value = [
+            {"code": "005930", "market": "KOSPI", "name": "삼성전자"},
+        ]
+        mock_store_cls.return_value = store_inst
+
         cb = MagicMock()
         out = run_data_collect_financials(
             market="KOSPI", top=100, progress_callback=cb,
@@ -167,7 +175,10 @@ class TestDataJobs:
         assert "005930" in bridge[2]
 
     @patch("alphapulse.webapp.services.data_jobs.FundamentalCollector")
-    def test_collect_financials_passes_progress_callback(self, mock_cls):
+    @patch("alphapulse.webapp.services.data_jobs.TradingStore")
+    def test_collect_financials_passes_progress_callback(
+        self, mock_store_cls, mock_cls,
+    ):
         """FundamentalCollector.collect 가 per-code progress_callback 을 받는다."""
         inst = MagicMock()
 
@@ -178,6 +189,13 @@ class TestDataJobs:
 
         inst.collect.side_effect = fake_collect
         mock_cls.return_value = inst
+
+        store_inst = MagicMock()
+        store_inst.get_all_stocks.return_value = [
+            {"code": "005930", "market": "KOSPI", "name": "삼성전자"},
+            {"code": "000660", "market": "KOSPI", "name": "SK하이닉스"},
+        ]
+        mock_store_cls.return_value = store_inst
 
         calls: list[tuple[int, int, str]] = []
         run_data_collect_financials(
@@ -190,7 +208,10 @@ class TestDataJobs:
         # start, per-code (005930), per-code (000660), 완료
         assert any("005930" in c[2] for c in calls)
         assert any("000660" in c[2] for c in calls)
-        assert calls[-1] == (1, 1, "완료")
+        # denominator 는 store 에서 해석된 실제 종목 수 (2)
+        assert calls[-1] == (2, 2, "완료")
+        # 시작 호출: (0, 2, ...)
+        assert calls[0][0] == 0 and calls[0][1] == 2
 
     @patch("alphapulse.webapp.services.data_jobs.WisereportCollector")
     @patch("alphapulse.webapp.services.data_jobs.TradingStore")
