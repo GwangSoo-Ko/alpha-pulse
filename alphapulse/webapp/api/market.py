@@ -143,7 +143,10 @@ async def run_pulse(
     jobs: JobRepository = Depends(get_jobs),
     runner: JobRunner = Depends(get_runner),
 ):
-    target_date = _resolve_target_date(body.date)
+    try:
+        target_date = _resolve_target_date(body.date)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     # 중복 running Job 감지 → 재사용
     existing = jobs.find_running_by_kind_and_date("market_pulse", target_date)

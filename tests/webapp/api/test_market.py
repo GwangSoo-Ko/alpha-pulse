@@ -258,3 +258,9 @@ def test_run_audit_log(client, app, monkeypatch):
     assert app.state.audit.log.called
     call_args = app.state.audit.log.call_args
     assert call_args.args[0] == "webapp.market.pulse.run"
+
+
+def test_run_with_invalid_date_returns_422(client):
+    """POST /run 에 잘못된 date 문자열 → 422 (500 아님)."""
+    r = client.post("/api/v1/market/pulse/run", json={"date": "not-a-date"})
+    assert r.status_code == 422
