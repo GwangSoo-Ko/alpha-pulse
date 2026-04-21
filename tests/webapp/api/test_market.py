@@ -155,3 +155,25 @@ def test_latest_requires_auth(app):
     c = TestClient(app, base_url="https://testserver")
     r = c.get("/api/v1/market/pulse/latest")
     assert r.status_code == 401
+
+
+def test_history_rejects_days_out_of_range(client):
+    r = client.get("/api/v1/market/pulse/history?days=0")
+    assert r.status_code == 422
+    r = client.get("/api/v1/market/pulse/history?days=500")
+    assert r.status_code == 422
+
+
+def test_pulse_detail_rejects_invalid_date_format(client):
+    r = client.get("/api/v1/market/pulse/not-a-date")
+    assert r.status_code == 422  # FastAPI path validation
+
+
+def test_history_and_detail_require_auth(app):
+    # base_url=https://testserver for secure cookies (consistency)
+    from fastapi.testclient import TestClient
+    c = TestClient(app, base_url="https://testserver")
+    r1 = c.get("/api/v1/market/pulse/history")
+    assert r1.status_code == 401
+    r2 = c.get("/api/v1/market/pulse/20260420")
+    assert r2.status_code == 401

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 
 from alphapulse.core.storage import PulseHistory
@@ -53,19 +53,23 @@ def get_jobs(request: Request) -> JobRepository:
 def _row_to_snapshot(row: dict) -> PulseSnapshot:
     """PulseHistory.get 결과 dict 를 API 응답 모델로 변환.
 
-    과거 저장분은 indicator_descriptions 키가 없으므로
-    indicator_scores 키셋에 맞춰 None 으로 채운다.
+    과거 저장분은 indicator_descriptions 키가 없을 수 있고,
+    반대로 description 만 있고 score 가 없는 키도 있을 수 있다.
+    두 키 집합의 합집합을 사용하고, 한쪽에만 있는 키는 다른 쪽을 None 으로 채운다.
     """
     details = row.get("details") or {}
     scores = details.get("indicator_scores") or {}
     descriptions_raw = details.get("indicator_descriptions") or {}
-    # 모든 score 키에 대해 description 기본 None
-    descriptions = {k: descriptions_raw.get(k) for k in scores.keys()}
+    # 키 집합: scores 와 descriptions 중 아무 쪽에 있는 모든 키.
+    # 한쪽에만 있으면 다른 쪽은 None 으로 채움.
+    all_keys = set(scores.keys()) | set(descriptions_raw.keys())
+    scores_full = {k: scores.get(k) for k in all_keys}
+    descriptions = {k: descriptions_raw.get(k) for k in all_keys}
     return PulseSnapshot(
         date=row["date"],
         score=row["score"],
         signal=row["signal"],
-        indicator_scores=scores,
+        indicator_scores=scores_full,
         indicator_descriptions=descriptions,
         period=details.get("period", "daily"),
         created_at=row["created_at"],
@@ -101,7 +105,7 @@ async def get_history(
 
 @router.get("/pulse/{date}", response_model=PulseSnapshot)
 async def get_pulse(
-    date: str,
+    date: str = Path(..., pattern=r"^\d{8}$", description="YYYYMMDD"),
     user: User = Depends(get_current_user),
     history: PulseHistory = Depends(get_pulse_history),
 ):
