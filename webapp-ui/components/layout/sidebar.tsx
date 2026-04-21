@@ -2,6 +2,7 @@ import Link from "next/link"
 
 const ITEMS: { href: string; label: string }[] = [
   { href: "/", label: "홈" },
+  { href: "/market/pulse", label: "시황" },
   { href: "/portfolio", label: "포트폴리오" },
   { href: "/risk", label: "리스크" },
   { href: "/screening", label: "스크리닝" },
