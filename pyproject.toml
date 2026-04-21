@@ -9,6 +9,9 @@ description = "AI 기반 투자 인텔리전스 플랫폼"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = [
+    # Python 3.12+: pykrx 가 pkg_resources 를 import → setuptools 필요
+    # setuptools 80+ 는 top-level pkg_resources 제거 → <80 으로 고정
+    "setuptools>=70,<80",
     # KMP dependencies
     "pykrx>=1.0.45",
     "finance-datareader>=0.9.90",
