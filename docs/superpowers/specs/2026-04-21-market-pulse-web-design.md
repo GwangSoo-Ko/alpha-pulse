@@ -33,7 +33,7 @@
 - 지표별 독립 페이지 (`/market/investor` 등) — 점수 카드로 대체
 - 두 날짜 비교 뷰
 - 실시간 자동 새로고침 (장 중 폴링)
-- `PulseHistory` 스키마 변경
+- `PulseHistory` 테이블 스키마 변경 (details JSON 본문은 `indicator_descriptions` 키 추가로 확장)
 - 시그널 알림 (Telegram 발송은 기존 `briefing` 이 담당)
 - CLI `ap market report` HTML 완전 재현 — 웹 페이지 자체가 대체
 
@@ -125,6 +125,7 @@ class PulseSnapshot(BaseModel):
     score: float
     signal: str   # strong_bullish | moderately_bullish | neutral | moderately_bearish | strong_bearish
     indicator_scores: dict[str, float | None]  # 11개 key (없는 지표는 null)
+    indicator_descriptions: dict[str, str | None]  # 11개 key, 사람이 읽는 설명. 과거 저장분은 null
     period: str   # "daily" (저장 시점의 period)
     created_at: float
 
@@ -168,17 +169,25 @@ class JobStatusResponse(BaseModel):
 
 ## 5. 프론트엔드 설계
 
-### 5.0 카드 인라인 확장 범위
+### 5.0 지표 카드 표시 범위
 
-본래 "카드 클릭 시 인라인 확장 → 상세 텍스트 표시" 로 설계했으나, PulseHistory 가 지표별 설명 텍스트를 저장하지 않음을 확인했다. 따라서 확장 콘텐츠는 다음만 포함한다:
-- 점수 숫자 (소수점 1자리)
-- 색상 바 (−100 ~ +100)
-- 시그널 강도 배지 (빨강~초록)
-- 지표 설명 정적 텍스트 (예: "외국인+기관 수급 = 최근 5일 순매수 추세") — `webapp-ui/lib/market-labels.ts` 에 하드코딩
+카드는 **접힌 상태 + 클릭 확장** 방식으로 두 단계 정보를 제공한다:
 
-카드 클릭 → 확장되더라도 추가 API 호출은 없고, 이미 받은 점수 데이터만 재배치한다. **상세 페이지와 메인 대시보드의 지표 정보량이 동일**해진다. 따라서 `expandAll` prop 도 의미 없어 제거.
+**접힌 상태 (기본)**
+- 지표 한글명 (예: "외국인+기관 수급")
+- 점수 숫자 (소수점 1자리, +/- 부호)
+- 색상 바 (−100 ~ +100 구간을 5색으로 표시)
 
-→ **결정 변경:** 메인 대시보드는 카드 확장 없이 고정 레이아웃. `/pulse/[date]` 와 동일한 `IndicatorGrid` 사용. 두 페이지의 차이는 "최신 vs 특정 날짜" + "RunButton 유무" + "prev/next 네비게이션 유무" 뿐.
+**펼친 상태 (클릭 후)**
+- 위 내용 + `indicator_descriptions[key]` 의 analyzer 생성 문자열
+  - 예: "외국인 +580억 | 기관 -220억 | 5일 외국인 +2,100억 | KOSPI 외국인 +580억..."
+  - 예: "USD/KRW 1,385.2 (원화 약세, +0.42%)"
+- 과거 저장분(`indicator_descriptions[key] == null`)은 "설명 저장 이전 날짜" 안내 표시
+
+**확장 정책**
+- 메인 대시보드: 기본 접힘, 사용자 클릭으로 개별 토글 (다중 펼침 허용)
+- `/pulse/[date]` 상세: 기본 전부 펼침 (`expandAll=true`) — 읽기 위해 들어온 페이지이므로 펼침이 default
+- 추가 API 호출 없음 — 모든 설명은 `PulseSnapshot.indicator_descriptions` 에 함께 옴
 
 ### 5.1 라우트
 ```
@@ -201,8 +210,8 @@ webapp-ui/app/(dashboard)/market/
 |---|---|---|
 | `score-hero-card.tsx` | 최신 스코어 숫자 + 시그널 배지 + 계산 시각 + "지금 실행" 버튼 | `snapshot: PulseSnapshot \| null`, `showRunButton: boolean` |
 | `pulse-history-chart.tsx` | recharts LineChart + 시그널 구간 색상, 30/60/90일 토글 | `items: HistoryItem[]`, `range: 30\|60\|90` |
-| `indicator-grid.tsx` | 11개 지표 카드 그리드 (반응형 2-4열) | `scores: Record<string, number \| null>` |
-| `indicator-card.tsx` | 개별 지표: 이름/점수/색상 바 | `name: string`, `koreanName: string`, `score: number \| null` |
+| `indicator-grid.tsx` | 11개 지표 카드 그리드 (반응형 2-4열) | `scores: Record<string, number \| null>`, `descriptions: Record<string, string \| null>`, `expandAll?: boolean` |
+| `indicator-card.tsx` | 개별 지표: 이름/점수/색상 바 + 클릭 시 설명 확장 | `name: string`, `koreanName: string`, `score: number \| null`, `description: string \| null`, `defaultExpanded?: boolean` |
 | `run-confirm-modal.tsx` | "오늘 이미 계산됨 (HH:MM). 재실행?" 모달 | `existingSavedAt: number`, `onConfirm/onCancel` |
 | `no-pulse-snapshot.tsx` | 빈 상태 (이력 없음) — 안내 + "지금 실행" CTA | `onRun?: () => void` |
 | `date-picker-inline.tsx` | prev/next/최신 버튼 | `currentDate: string`, `availableDates: string[]` |
@@ -213,7 +222,7 @@ webapp-ui/app/(dashboard)/market/
 ```
 [ScoreHeroCard: 최신]       [RunButton]
 [PulseHistoryChart(30일)] [30/60/90 토글]
-[IndicatorGrid (11개 지표 점수 카드)]
+[IndicatorGrid (11개 지표 카드, 기본 접힘 + 클릭 확장)]
 ```
 - 이력 전무 시: `<NoPulseSnapshot />` 렌더
 
@@ -221,11 +230,10 @@ webapp-ui/app/(dashboard)/market/
 ```
 [DatePickerInline: prev | {date} | next | "최신"]
 [ScoreHeroCard: 해당 날짜, RunButton 없음]
-[IndicatorGrid (11개 지표 점수 카드)]
+[IndicatorGrid (expandAll=true, 설명 전부 펼침)]
 ```
 - 해당 날짜 이력 없음 → 404 (Next.js `notFound()`)
-
-**제약사항:** `PulseHistory.details` 에는 `indicator_scores` 만 저장되고 CLI 에서 보이는 지표별 설명 텍스트(예: "KOSPI 외국인 +580억 | 기관 -220억")는 저장되지 않는다. 따라서 상세 페이지도 **점수 + 색상 바**만 제공한다. 풍부한 해설이 필요하면 CLI `ap market investor/sector/...` 또는 "지금 실행" 으로 재계산 경로를 사용한다 (재계산 시에도 현재는 미저장).
+- `indicator_descriptions` 의 각 키가 null 이면 카드에 "설명 저장 이전 날짜 — '지금 실행' 으로 재계산하세요" 안내 노출
 
 **`/market/pulse/jobs/[id]`** (진행)
 - Phase 2 `JobProgress` 재사용
@@ -265,11 +273,41 @@ export const SIGNAL_STYLE: Record<string, { bar: string; badge: string; label: s
 
 ## 6. 데이터 모델
 
-### 기존 재사용 (변경 없음)
+### 기존 재사용 (스키마 변경 없음)
 - `PulseHistory` (`alphapulse/core/storage/history.py`) — `pulse_history` 테이블
   - PK: `date` (YYYYMMDD)
   - 필드: `score REAL, signal TEXT, details TEXT(JSON), created_at REAL`
   - 메서드: `save / get / get_range / get_recent`
+  - **테이블 스키마 변경 없음.** `details` JSON 본문에 새 키 `indicator_descriptions` 추가 (하위 호환)
+
+### SignalEngine 저장 payload 변경
+`alphapulse/market/engine/signal_engine.py` `run()` 말미의 `self.history.save(...)` 호출에서 `details` dict 확장:
+```python
+# 기존
+self.history.save(target_date, final_score, signal, {
+    "indicator_scores": serializable_scores,
+    "period": period,
+})
+
+# 변경 후
+indicator_descriptions = {
+    k: (v.get("details") if isinstance(v, dict) else None)
+    for k, v in details.items()  # details는 각 analyzer의 전체 반환 dict
+}
+self.history.save(target_date, final_score, signal, {
+    "indicator_scores": serializable_scores,
+    "indicator_descriptions": indicator_descriptions,  # 신규
+    "period": period,
+})
+```
+- analyzer 의 반환 dict 중 `"details"` 문자열만 추출 (DataFrames 등 직렬화 불가 필드 제외)
+- analyzer 가 실패해 `details["indicator_key"]` 가 없는 경우 `None`
+
+### API 응답 빌더
+`/pulse/{date}`, `/pulse/latest` 는 `PulseHistory.get()` 로 읽은 row 의 `details` JSON 을 언팩해 응답:
+- `indicator_scores` — `details.indicator_scores` (없으면 `{}`)
+- `indicator_descriptions` — `details.indicator_descriptions` (없으면 11 키 모두 `None` 인 dict, 즉 과거 저장분)
+- `period` — `details.period` (없으면 `"daily"`)
 
 ### Job 저장소 (Phase 2 재사용)
 `alphapulse.webapp.store.jobs` 의 Job 테이블 그대로 사용. 새 job kind 추가:
@@ -343,8 +381,10 @@ webapp-ui/e2e/market-pulse.spec.ts
 
 ### 수정
 ```
-alphapulse/webapp/app.py                        # market router 등록
-webapp-ui/components/layout/sidebar.tsx         # "시황" 항목 추가
+alphapulse/webapp/app.py                            # market router 등록
+alphapulse/market/engine/signal_engine.py           # history.save payload 에 indicator_descriptions 추가
+webapp-ui/components/layout/sidebar.tsx             # "시황" 항목 추가
+tests/market/engine/test_signal_engine.py           # (존재 시) save payload 스펙 검증 추가
 ```
 
 ---
@@ -357,6 +397,8 @@ webapp-ui/components/layout/sidebar.tsx         # "시황" 항목 추가
 | Job 실행 시간 30~60초 | 사용자가 오래 기다림 | 진행률 폴링(3초) + 명시 "최대 1분 소요" 안내 |
 | history.db 경로 주입 | webapp config 에 `HISTORY_DB` 없으면 에러 | `Config.HISTORY_DB` 기본값 재사용 (기존 CLI 와 동일 경로) |
 | 동시 실행 race condition | 같은 날짜 두 Job 동시 실행 시 중복 저장 (덮어쓰기는 idempotent 하지만 자원 낭비) | DB-level 체크 + INSERT 전 재확인. 완벽 배제 아니나 수용 가능 |
+| SignalEngine save payload 변경 | 기존 테스트(`tests/market/engine/`)가 저장된 details 구조를 assertion 하면 깨질 수 있음 | 기존 키(`indicator_scores`, `period`) 유지 + 신규 키만 추가 (비파괴적). 관련 테스트 있으면 기대값 갱신 |
+| 과거 이력 description 부재 | 이전 저장 날짜는 카드 펼쳐도 "설명 없음" | 프론트에 "재계산하세요" 안내. 기대 동작으로 문서화 |
 
 ---
 
@@ -368,7 +410,8 @@ webapp-ui/components/layout/sidebar.tsx         # "시황" 항목 추가
 | 페이지 구조 | 메인 + 날짜 상세 + Job 3페이지 | Phase 2 스크리닝/백테스트 패턴 일관성 |
 | 중복 실행 정책 | 기존 running Job 재사용 (reused 플래그) | Idempotent UX |
 | 덮어쓰기 확인 | 프론트 모달 (서버 `force` 플래그 없음) | API 단순화 |
-| 지표 표시 | 11개 카드 (점수 + 색상 바) | 전체 조망, 확장은 저장된 데이터 부재로 취소 |
+| 지표 표시 | 11개 카드 + 클릭 확장(설명 표시) | SignalEngine 에서 description 저장 → 카드 확장 시 인라인 표시 |
+| 과거 저장분 처리 | description=null 로 응답, 프론트에 "재계산 요망" 안내 | 스키마 변경 없이 하위 호환 |
 | period 지원 | daily 고정 | YAGNI |
 | 지표별 독립 페이지 | 만들지 않음 | YAGNI, 탭/카드로 대체 |
 | 스키마 변경 | 없음 | `PulseHistory` 재사용 |
