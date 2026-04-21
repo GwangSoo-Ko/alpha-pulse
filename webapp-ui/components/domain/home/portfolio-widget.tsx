@@ -17,14 +17,7 @@ type Props = {
 
 export function PortfolioWidget({ portfolio, history }: Props) {
   if (!portfolio) {
-    return (
-      <Card className="p-6 h-full">
-        <h2 className="text-lg font-semibold mb-2">포트폴리오</h2>
-        <p className="text-sm text-neutral-500">
-          포트폴리오 스냅샷 없음. 매매 실행 전 상태.
-        </p>
-      </Card>
-    )
+    return <PortfolioEmptyState />
   }
   const top5 = portfolio.positions.slice(0, 5)
   return (
@@ -97,5 +90,69 @@ function Sparkline({ points }: { points: number[] }) {
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-16">
       <path d={d} stroke="#22c55e" strokeWidth="2" fill="none" />
     </svg>
+  )
+}
+
+function PortfolioEmptyState() {
+  return (
+    <Card className="p-6 h-full space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold mb-1">포트폴리오</h2>
+        <p className="text-sm text-neutral-500">
+          아직 매매 실행 이력이 없어 표시할 스냅샷이 없습니다.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-4 space-y-3">
+        <h3 className="text-sm font-medium text-neutral-200">시작하는 방법</h3>
+        <ol className="list-decimal list-inside space-y-2 text-xs text-neutral-400">
+          <li>
+            <span className="text-neutral-200">데이터 준비</span> — 최신 시세/재무 데이터가 DB에 있는지 확인
+            <div className="ml-4 mt-1">
+              <Link href="/data" className="text-blue-400 hover:underline">
+                → /data 페이지에서 현황 확인
+              </Link>
+            </div>
+          </li>
+          <li>
+            <span className="text-neutral-200">Paper 모드 1회 실행</span> — 가상 계좌로 전체 파이프라인 동작 검증
+            <div className="mt-1 ml-4 font-mono text-xs text-neutral-500 bg-neutral-950 px-2 py-1 rounded">
+              uv run ap trading run --mode paper
+            </div>
+            <p className="ml-4 mt-1 text-[11px] text-neutral-500">
+              실제 돈은 움직이지 않습니다. 데이터 수집 → 전략 → 시그널 → 가상 주문 → 스냅샷까지 한 번에 실행.
+            </p>
+          </li>
+          <li>
+            <span className="text-neutral-200">결과 확인</span> — 이 페이지 새로고침 or{" "}
+            <Link href="/portfolio" className="text-blue-400 hover:underline">/portfolio</Link>
+          </li>
+        </ol>
+      </div>
+
+      <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-4 space-y-2">
+        <h3 className="text-sm font-medium text-neutral-200">먼저 해볼 것들</h3>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <Link
+            href="/backtest/new"
+            className="px-3 py-1.5 rounded border border-neutral-700 hover:bg-neutral-800"
+          >
+            백테스트 실행 →
+          </Link>
+          <Link
+            href="/screening/new"
+            className="px-3 py-1.5 rounded border border-neutral-700 hover:bg-neutral-800"
+          >
+            스크리닝 실행 →
+          </Link>
+          <Link
+            href="/data"
+            className="px-3 py-1.5 rounded border border-neutral-700 hover:bg-neutral-800"
+          >
+            데이터 현황 →
+          </Link>
+        </div>
+      </div>
+    </Card>
   )
 }

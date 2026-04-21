@@ -2,6 +2,7 @@ import { cookies } from "next/headers"
 import { apiFetch } from "@/lib/api-client"
 import { SummaryCard } from "@/components/domain/portfolio/summary-card"
 import { HoldingsTable } from "@/components/domain/portfolio/holdings-table"
+import { NoSnapshot } from "@/components/domain/no-snapshot"
 
 export const dynamic = "force-dynamic"
 
@@ -21,9 +22,9 @@ export default async function PortfolioPage({ searchParams }: Props) {
   })
   if (!snap) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
         <h1 className="text-2xl font-semibold">포트폴리오 ({mode})</h1>
-        <p className="text-neutral-500">스냅샷 없음.</p>
+        <NoSnapshot mode={mode} />
       </div>
     )
   }

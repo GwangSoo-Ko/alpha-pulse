@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import { apiFetch } from "@/lib/api-client"
 import { RiskCards } from "@/components/domain/risk/risk-cards"
+import { NoSnapshot } from "@/components/domain/no-snapshot"
 
 export const dynamic = "force-dynamic"
 
@@ -26,9 +27,9 @@ export default async function RiskPage({ searchParams }: Props) {
   })
   if (!data) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
         <h1 className="text-2xl font-semibold">리스크 ({mode})</h1>
-        <p className="text-neutral-500">스냅샷 없음.</p>
+        <NoSnapshot mode={mode} />
       </div>
     )
   }
