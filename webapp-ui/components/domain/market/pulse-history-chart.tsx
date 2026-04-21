@@ -33,6 +33,7 @@ export function PulseHistoryChart({
   initialRange?: number
 }) {
   const [range, setRange] = useState(initialRange)
+  const sliced = items.slice(-range)
 
   return (
     <Card className="p-4">
@@ -56,7 +57,7 @@ export function PulseHistoryChart({
       </div>
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={items}>
+          <LineChart data={sliced}>
             <XAxis
               dataKey="date" tickFormatter={formatDateTick}
               stroke="#888" fontSize={11}

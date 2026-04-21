@@ -17,7 +17,7 @@ export default async function MarketPulsePage() {
       { headers: h, cache: "no-store" },
     ),
     apiFetch<{ items: HistoryItem[] }>(
-      "/api/v1/market/pulse/history?days=30",
+      "/api/v1/market/pulse/history?days=90",
       { headers: h, cache: "no-store" },
     ),
   ])

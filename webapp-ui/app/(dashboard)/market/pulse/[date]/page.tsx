@@ -1,6 +1,6 @@
 import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
-import { apiFetch } from "@/lib/api-client"
+import { ApiError, apiFetch } from "@/lib/api-client"
 import { ScoreHeroCard, type PulseSnapshot } from "@/components/domain/market/score-hero-card"
 import { IndicatorGrid } from "@/components/domain/market/indicator-grid"
 import { DatePickerInline } from "@/components/domain/market/date-picker-inline"
@@ -45,9 +45,7 @@ export default async function PulseDetailPage({ params }: Props) {
       </div>
     )
   } catch (e) {
-    if (e instanceof Error && /404/.test(e.message)) {
-      notFound()
-    }
+    if (e instanceof ApiError && e.status === 404) notFound()
     throw e
   }
 }

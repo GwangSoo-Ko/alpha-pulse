@@ -5,6 +5,14 @@ import { useJobStatus } from "@/hooks/use-job-status"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
+function isToday(yyyymmdd: string): boolean {
+  const now = new Date()
+  const yyyy = String(now.getFullYear())
+  const mm = String(now.getMonth() + 1).padStart(2, "0")
+  const dd = String(now.getDate()).padStart(2, "0")
+  return yyyymmdd === `${yyyy}${mm}${dd}`
+}
+
 export function MarketJobProgress({ jobId }: { jobId: string }) {
   const router = useRouter()
   const { data: job, error } = useJobStatus(jobId)
@@ -12,7 +20,7 @@ export function MarketJobProgress({ jobId }: { jobId: string }) {
   useEffect(() => {
     if (job?.status === "done") {
       const dest = job.result_ref && /^\d{8}$/.test(job.result_ref)
-        ? `/market/pulse/${job.result_ref}`
+        ? (isToday(job.result_ref) ? "/market/pulse" : `/market/pulse/${job.result_ref}`)
         : "/market/pulse"
       router.replace(dest)
     }
