@@ -199,7 +199,7 @@ async def get_summary(
     rates_raw = evaluator.get_hit_rates(days)
     correlation = evaluator.get_correlation(days)
     accuracy_raw = evaluator.get_indicator_accuracy(days)
-    recent = store.get_recent(days=10)
+    recent = store.get_recent(limit=10)
 
     # 빈 데이터: hit_rate_* 는 evaluator 가 0.0 반환하지만 spec 는 null 선호
     total = rates_raw.get("total_evaluated", 0)
@@ -230,7 +230,7 @@ async def get_history(
     user: User = Depends(get_current_user),
     store: FeedbackStore = Depends(get_feedback_store),
 ):
-    rows = store.get_recent(days=days)
+    rows = store.get_recent(limit=days)
     total = len(rows)
     start = (page - 1) * size
     sliced = rows[start:start + size]
