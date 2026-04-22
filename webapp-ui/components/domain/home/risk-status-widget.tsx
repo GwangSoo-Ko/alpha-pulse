@@ -1,48 +1,36 @@
+"use client"
 import Link from "next/link"
 import { Card } from "@/components/ui/card"
-import { fmtPct } from "@/lib/format"
 
-type Props = {
-  risk: {
-    report: {
-      var_95?: number
-      cvar_95?: number
-      drawdown_status?: string
-      alerts?: { level: string; message: string }[]
-    }
-  } | null
+type RiskReport = {
+  report?: {
+    var_95?: number
+    cvar_95?: number
+    drawdown_status?: string
+    alerts?: { level: string; message: string }[]
+  }
 }
 
-export function RiskStatusWidget({ risk }: Props) {
-  const r = risk?.report
-  const status = r?.drawdown_status ?? "-"
-  const statusColor =
-    status === "NORMAL" ? "text-green-400"
-    : status === "WARN" ? "text-yellow-400"
-    : status === "DELEVERAGE" ? "text-red-400"
-    : "text-neutral-400"
+export function RiskStatusWidget({ risk }: { risk: RiskReport | null }) {
+  const alerts = risk?.report?.alerts ?? []
   return (
-    <Card className="p-4 space-y-2">
-      <div className="flex justify-between items-center">
-        <h3 className="font-medium">리스크 상태</h3>
-        <Link href="/risk" className="text-xs text-blue-400 hover:underline">상세 →</Link>
-      </div>
-      <div className="flex justify-between text-sm">
-        <span className="text-neutral-400">DD</span>
-        <span className={`font-medium ${statusColor}`}>{status}</span>
-      </div>
-      <div className="flex justify-between text-sm">
-        <span className="text-neutral-400">VaR95</span>
-        <span className="font-mono">{r?.var_95 !== undefined ? fmtPct(r.var_95) : "-"}</span>
-      </div>
-      <div className="flex justify-between text-sm">
-        <span className="text-neutral-400">CVaR95</span>
-        <span className="font-mono">{r?.cvar_95 !== undefined ? fmtPct(r.cvar_95) : "-"}</span>
-      </div>
-      <div className="flex justify-between text-sm">
-        <span className="text-neutral-400">경고</span>
-        <span className="font-mono">{r?.alerts?.length ?? 0}건</span>
-      </div>
-    </Card>
+    <Link href="/risk" className="block">
+      <Card className="p-4 min-h-[160px] hover:border-neutral-600 transition">
+        <div className="text-xs text-neutral-400 uppercase tracking-wide mb-2">Risk</div>
+        {!risk ? (
+          <p className="text-sm text-neutral-500">리스크 데이터 없음</p>
+        ) : alerts.length === 0 ? (
+          <>
+            <div className="text-2xl font-bold text-emerald-400 mb-2">정상</div>
+            <p className="text-xs text-neutral-500">경고 없음</p>
+          </>
+        ) : (
+          <>
+            <div className="text-2xl font-bold text-amber-400 mb-2">⚠ {alerts.length}건</div>
+            <p className="text-xs text-neutral-300 line-clamp-2">{alerts[0].message}</p>
+          </>
+        )}
+      </Card>
+    </Link>
   )
 }
