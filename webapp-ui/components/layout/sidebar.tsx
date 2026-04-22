@@ -5,6 +5,7 @@ const ITEMS: { href: string; label: string }[] = [
   { href: "/market/pulse", label: "시황" },
   { href: "/content", label: "콘텐츠" },
   { href: "/briefings", label: "브리핑" },
+  { href: "/feedback", label: "피드백" },
   { href: "/portfolio", label: "포트폴리오" },
   { href: "/risk", label: "리스크" },
   { href: "/screening", label: "스크리닝" },

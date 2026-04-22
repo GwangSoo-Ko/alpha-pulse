@@ -73,6 +73,7 @@ pytest tests/ --cov=alphapulse       # 커버리지
 - Market Pulse 웹 대시보드 설계: `docs/superpowers/specs/2026-04-21-market-pulse-web-design.md`
 - Content 웹 대시보드 설계: `docs/superpowers/specs/2026-04-21-content-web-design.md`
 - Briefing 웹 대시보드 설계: `docs/superpowers/specs/2026-04-21-briefing-web-design.md`
+- Feedback 웹 대시보드 설계: `docs/superpowers/specs/2026-04-22-feedback-web-design.md`
 
 ## Custom Commands
 
