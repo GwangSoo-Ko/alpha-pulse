@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from alphapulse.webapp.api.dashboard import (
     _build_briefing_hero,
+    _build_feedback_widget,
     _build_pulse_widget,
     _select_top3_indicators,
 )
@@ -274,3 +275,53 @@ class TestBuildPulseWidget:
         hist.get_recent.return_value = []
         _build_pulse_widget(hist)
         hist.get_recent.assert_called_once_with(days=7)
+
+
+class TestBuildFeedbackWidget:
+    def test_returns_none_when_no_records(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0.0, "hit_rate_3d": 0.0, "hit_rate_5d": 0.0,
+            "total_evaluated": 0,
+        }
+        result = _build_feedback_widget(ev)
+        assert result is None
+
+    def test_hit_rate_maps_from_1d(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0.714, "hit_rate_3d": 0.5, "hit_rate_5d": 0.6,
+            "total_evaluated": 7,
+        }
+        ev.get_indicator_accuracy.return_value = {}
+        result = _build_feedback_widget(ev)
+        assert result is not None
+        assert result.hit_rate_7d == 0.714
+        assert result.top_indicators == []
+
+    def test_top_indicators_limited_to_2_and_ordered_by_accuracy(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0.5, "hit_rate_3d": 0, "hit_rate_5d": 0,
+            "total_evaluated": 10,
+        }
+        ev.get_indicator_accuracy.return_value = {
+            "RSI": {"accuracy": 0.80, "hits": 4, "total": 5},
+            "MA": {"accuracy": 0.60, "hits": 3, "total": 5},
+            "VIX": {"accuracy": 0.90, "hits": 9, "total": 10},
+            "FX_LOWN": {"accuracy": 1.0, "hits": 1, "total": 1},
+            "VOL_LOWN": {"accuracy": 1.0, "hits": 2, "total": 2},
+        }
+        result = _build_feedback_widget(ev)
+        names = [i.name for i in result.top_indicators]
+        assert names == ["VIX", "RSI"]
+        assert result.top_indicators[0].hit_rate == 0.90
+
+    def test_days_argument_is_7(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0, "hit_rate_3d": 0, "hit_rate_5d": 0,
+            "total_evaluated": 0,
+        }
+        _build_feedback_widget(ev)
+        ev.get_hit_rates.assert_called_once_with(days=7)

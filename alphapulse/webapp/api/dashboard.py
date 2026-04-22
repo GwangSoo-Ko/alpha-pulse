@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from alphapulse.core.config import Config
 from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.core.storage.history import PulseHistory
+from alphapulse.feedback.evaluator import FeedbackEvaluator
 from alphapulse.webapp.auth.deps import get_current_user
 from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
@@ -174,6 +175,27 @@ def _build_pulse_widget(history: PulseHistory) -> PulseWidgetData:
         for r in chronological
     ]
     return PulseWidgetData(latest=latest, history7=history7)
+
+
+def _build_feedback_widget(evaluator: FeedbackEvaluator) -> FeedbackWidgetData | None:
+    """최근 7일 피드백 요약 (적중률 + 지표 TOP2)."""
+    rates = evaluator.get_hit_rates(days=7)
+    if rates.get("total_evaluated", 0) == 0:
+        return None
+
+    acc = evaluator.get_indicator_accuracy(days=7, threshold=50.0)
+    qualified = [
+        (name, float(v["accuracy"]))
+        for name, v in acc.items()
+        if v.get("total", 0) >= 3
+    ]
+    qualified.sort(key=lambda t: t[1], reverse=True)
+    top = qualified[:2]
+
+    return FeedbackWidgetData(
+        hit_rate_7d=float(rates.get("hit_rate_1d", 0.0)),
+        top_indicators=[FeedbackIndicator(name=n, hit_rate=r) for n, r in top],
+    )
 
 
 def get_portfolio(request: Request) -> PortfolioReader:
