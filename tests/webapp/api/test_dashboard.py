@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from alphapulse.webapp.api.dashboard import (
     _build_briefing_hero,
+    _build_content_widget,
     _build_feedback_widget,
     _build_pulse_widget,
     _select_top3_indicators,
@@ -325,3 +326,48 @@ class TestBuildFeedbackWidget:
         }
         _build_feedback_widget(ev)
         ev.get_hit_rates.assert_called_once_with(days=7)
+
+
+class TestBuildContentWidget:
+    def test_empty_result_returns_empty_list(self):
+        reader = MagicMock()
+        reader.list_reports.return_value = {
+            "items": [], "total": 0, "page": 1, "size": 3, "categories": [],
+        }
+        result = _build_content_widget(reader)
+        assert result.recent == []
+
+    def test_maps_items_to_recent(self):
+        reader = MagicMock()
+        reader.list_reports.return_value = {
+            "items": [
+                {
+                    "filename": "samsung.md",
+                    "title": "삼성전자 분석",
+                    "category": "기업",
+                    "published": "2026-04-22",
+                    "analyzed_at": "2026-04-22T08:30",
+                },
+                {
+                    "filename": "ai.md",
+                    "title": "AI 테마",
+                    "category": "테마",
+                    "published": "2026-04-21",
+                    "analyzed_at": "2026-04-21T10:00",
+                },
+            ],
+            "total": 2, "page": 1, "size": 3, "categories": ["기업", "테마"],
+        }
+        result = _build_content_widget(reader)
+        assert len(result.recent) == 2
+        assert result.recent[0].filename == "samsung.md"
+        assert result.recent[0].title == "삼성전자 분석"
+        assert result.recent[0].date == "2026-04-22"
+
+    def test_called_with_size_3_newest(self):
+        reader = MagicMock()
+        reader.list_reports.return_value = {
+            "items": [], "total": 0, "page": 1, "size": 3, "categories": [],
+        }
+        _build_content_widget(reader)
+        reader.list_reports.assert_called_once_with(size=3, sort="newest")

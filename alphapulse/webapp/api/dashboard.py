@@ -11,6 +11,7 @@ from alphapulse.core.storage.history import PulseHistory
 from alphapulse.feedback.evaluator import FeedbackEvaluator
 from alphapulse.webapp.auth.deps import get_current_user
 from alphapulse.webapp.store.readers.audit import AuditReader
+from alphapulse.webapp.store.readers.content import ContentReader
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
 from alphapulse.webapp.store.readers.portfolio import PortfolioReader
 from alphapulse.webapp.store.readers.risk import RiskReader
@@ -196,6 +197,21 @@ def _build_feedback_widget(evaluator: FeedbackEvaluator) -> FeedbackWidgetData |
         hit_rate_7d=float(rates.get("hit_rate_1d", 0.0)),
         top_indicators=[FeedbackIndicator(name=n, hit_rate=r) for n, r in top],
     )
+
+
+def _build_content_widget(reader: ContentReader) -> ContentWidgetData:
+    """최근 3건 리포트를 위젯 데이터로 변환한다."""
+    result = reader.list_reports(size=3, sort="newest")
+    items = result.get("items", [])
+    recent = [
+        ContentRecentItem(
+            date=str(m.get("analyzed_at") or "")[:10],
+            filename=str(m.get("filename") or ""),
+            title=str(m.get("title") or ""),
+        )
+        for m in items
+    ]
+    return ContentWidgetData(recent=recent)
 
 
 def get_portfolio(request: Request) -> PortfolioReader:
