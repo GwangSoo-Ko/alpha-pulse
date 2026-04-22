@@ -15,6 +15,59 @@ from alphapulse.webapp.store.users import User
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
+class HighlightBadge(BaseModel):
+    name: str
+    direction: str   # up | down | neutral
+    sentiment: str   # positive | negative | neutral
+
+
+class BriefingHeroData(BaseModel):
+    date: str                          # YYYYMMDD
+    created_at: int                    # epoch seconds
+    score: float
+    signal: str
+    summary_line: str
+    highlight_badges: list[HighlightBadge]
+    is_today: bool
+
+
+class PulseLatest(BaseModel):
+    date: str
+    score: float
+    signal: str
+
+
+class PulseHistoryPoint(BaseModel):
+    date: str
+    score: float
+    signal: str
+
+
+class PulseWidgetData(BaseModel):
+    latest: PulseLatest | None
+    history7: list[PulseHistoryPoint]
+
+
+class FeedbackIndicator(BaseModel):
+    name: str
+    hit_rate: float
+
+
+class FeedbackWidgetData(BaseModel):
+    hit_rate_7d: float | None
+    top_indicators: list[FeedbackIndicator]
+
+
+class ContentRecentItem(BaseModel):
+    date: str
+    filename: str
+    title: str
+
+
+class ContentWidgetData(BaseModel):
+    recent: list[ContentRecentItem]
+
+
 class HomeResponse(BaseModel):
     portfolio: dict | None
     portfolio_history: list
@@ -22,6 +75,45 @@ class HomeResponse(BaseModel):
     data_status: dict
     recent_backtests: list
     recent_audits: list
+
+
+def _select_top3_indicators(pulse_result: dict) -> list[dict]:
+    """pulse_result 의 지표 목록에서 score 절대값 TOP3 을 반환한다.
+
+    indicator_descriptions 가 있으면 우선 사용, 없으면 indicators 사용.
+    각 지표의 value 는 `{score: float}` 또는 scalar 숫자 둘 다 허용.
+    """
+    source = pulse_result.get("indicator_descriptions") or pulse_result.get("indicators")
+    if not isinstance(source, dict) or not source:
+        return []
+
+    scored: list[tuple[str, float]] = []
+    for name, value in source.items():
+        if isinstance(value, dict):
+            raw = value.get("score")
+        else:
+            raw = value
+        if raw is None:
+            continue
+        try:
+            score = float(raw)
+        except (TypeError, ValueError):
+            continue
+        scored.append((name, score))
+
+    scored.sort(key=lambda t: abs(t[1]), reverse=True)
+    top = scored[:3]
+
+    result: list[dict] = []
+    for name, score in top:
+        if score > 0:
+            direction, sentiment = "up", "positive"
+        elif score < 0:
+            direction, sentiment = "down", "negative"
+        else:
+            direction, sentiment = "neutral", "neutral"
+        result.append({"name": name, "direction": direction, "sentiment": sentiment})
+    return result
 
 
 def get_portfolio(request: Request) -> PortfolioReader:

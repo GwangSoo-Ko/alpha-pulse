@@ -105,3 +105,52 @@ class TestHome:
             "/api/v1/dashboard/home",
         )
         assert r.status_code == 401
+
+
+from alphapulse.webapp.api.dashboard import _select_top3_indicators  # noqa: E402
+
+
+class TestSelectTop3Indicators:
+    def test_returns_empty_when_no_keys(self):
+        assert _select_top3_indicators({}) == []
+
+    def test_returns_empty_when_indicators_and_descriptions_missing(self):
+        assert _select_top3_indicators({"score": 50, "signal": "positive"}) == []
+
+    def test_picks_top3_by_abs_score_from_indicators(self):
+        pulse = {
+            "indicators": {
+                "RSI": {"score": 80},
+                "MA": {"score": -30},
+                "VIX": {"score": 60},
+                "VOL": {"score": 10},
+                "FX": {"score": -70},
+            }
+        }
+        result = _select_top3_indicators(pulse)
+        assert len(result) == 3
+        assert [r["name"] for r in result] == ["RSI", "FX", "VIX"]
+
+    def test_direction_and_sentiment_signs(self):
+        pulse = {"indicators": {"A": {"score": 80}, "B": {"score": -40}, "C": {"score": 0}}}
+        result = _select_top3_indicators(pulse)
+        by_name = {r["name"]: r for r in result}
+        assert by_name["A"]["direction"] == "up"
+        assert by_name["A"]["sentiment"] == "positive"
+        assert by_name["B"]["direction"] == "down"
+        assert by_name["B"]["sentiment"] == "negative"
+        assert by_name["C"]["direction"] == "neutral"
+        assert by_name["C"]["sentiment"] == "neutral"
+
+    def test_indicator_descriptions_preferred_over_indicators(self):
+        pulse = {
+            "indicator_descriptions": {"DESC_A": {"score": 90}},
+            "indicators": {"IND_A": {"score": 50}, "IND_B": {"score": 60}},
+        }
+        result = _select_top3_indicators(pulse)
+        assert [r["name"] for r in result] == ["DESC_A"]
+
+    def test_accepts_scalar_score_value(self):
+        pulse = {"indicators": {"X": 70, "Y": -20, "Z": 55}}
+        result = _select_top3_indicators(pulse)
+        assert [r["name"] for r in result] == ["X", "Z", "Y"]
