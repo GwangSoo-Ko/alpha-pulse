@@ -1,10 +1,17 @@
 """Dashboard home API — aggregation."""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from alphapulse.webapp.api.dashboard import (
+    _build_briefing_hero,
+    _build_content_widget,
+    _build_feedback_widget,
+    _build_pulse_widget,
+    _select_top3_indicators,
+)
 from alphapulse.webapp.api.dashboard import router as dash_router
 from alphapulse.webapp.auth.routes import router as auth_router
 from alphapulse.webapp.auth.security import hash_password
@@ -62,6 +69,29 @@ def app(webapp_db):  # noqa: PLR0915
     bt.list_runs.return_value = listing
     app.state.backtest_reader = bt
 
+    # Phase 3 readers (신규)
+    briefing_store = MagicMock()
+    briefing_store.get_recent.return_value = []
+    app.state.briefing_store = briefing_store
+
+    pulse_history = MagicMock()
+    pulse_history.get_recent.return_value = []
+    app.state.pulse_history = pulse_history
+
+    feedback_evaluator = MagicMock()
+    feedback_evaluator.get_hit_rates.return_value = {
+        "hit_rate_1d": 0.0, "hit_rate_3d": 0.0, "hit_rate_5d": 0.0,
+        "total_evaluated": 0,
+    }
+    feedback_evaluator.get_indicator_accuracy.return_value = {}
+    app.state.feedback_evaluator = feedback_evaluator
+
+    content_reader = MagicMock()
+    content_reader.list_reports.return_value = {
+        "items": [], "total": 0, "page": 1, "size": 3, "categories": [],
+    }
+    app.state.content_reader = content_reader
+
     app.state.users.create(
         email="a@x.com",
         password_hash=hash_password("long-enough-pw!"),
@@ -99,9 +129,329 @@ class TestHome:
         assert body["portfolio"]["total_value"] == 100_000_000
         assert body["risk"]["report"]["var_95"] == -2.5
         assert "tables" in body["data_status"]
+        # 신규 필드 존재
+        assert "briefing" in body
+        assert "pulse" in body
+        assert "feedback" in body
+        assert "content" in body
 
     def test_requires_auth(self, app):
         r = TestClient(app, base_url="https://testserver").get(
             "/api/v1/dashboard/home",
         )
         assert r.status_code == 401
+
+
+class TestSelectTop3Indicators:
+    def test_returns_empty_when_no_keys(self):
+        assert _select_top3_indicators({}) == []
+
+    def test_returns_empty_when_indicators_and_descriptions_missing(self):
+        assert _select_top3_indicators({"score": 50, "signal": "positive"}) == []
+
+    def test_picks_top3_by_abs_score_from_indicators(self):
+        pulse = {
+            "indicators": {
+                "RSI": {"score": 80},
+                "MA": {"score": -30},
+                "VIX": {"score": 60},
+                "VOL": {"score": 10},
+                "FX": {"score": -70},
+            }
+        }
+        result = _select_top3_indicators(pulse)
+        assert len(result) == 3
+        assert [r["name"] for r in result] == ["RSI", "FX", "VIX"]
+
+    def test_direction_and_sentiment_signs(self):
+        pulse = {"indicators": {"A": {"score": 80}, "B": {"score": -40}, "C": {"score": 0}}}
+        result = _select_top3_indicators(pulse)
+        by_name = {r["name"]: r for r in result}
+        assert by_name["A"]["direction"] == "up"
+        assert by_name["A"]["sentiment"] == "positive"
+        assert by_name["B"]["direction"] == "down"
+        assert by_name["B"]["sentiment"] == "negative"
+        assert by_name["C"]["direction"] == "neutral"
+        assert by_name["C"]["sentiment"] == "neutral"
+
+    def test_indicator_descriptions_preferred_over_indicators(self):
+        pulse = {
+            "indicator_descriptions": {"DESC_A": {"score": 90}},
+            "indicators": {"IND_A": {"score": 50}, "IND_B": {"score": 60}},
+        }
+        result = _select_top3_indicators(pulse)
+        assert [r["name"] for r in result] == ["DESC_A"]
+
+    def test_accepts_scalar_score_value(self):
+        pulse = {"indicators": {"X": 70, "Y": -20, "Z": 55}}
+        result = _select_top3_indicators(pulse)
+        assert [r["name"] for r in result] == ["X", "Z", "Y"]
+
+    def test_returns_empty_when_source_is_not_dict(self):
+        # "indicators" 키가 있지만 dict 가 아닐 때 안전하게 빈 리스트
+        assert _select_top3_indicators({"indicators": "not-a-dict"}) == []
+
+    def test_stable_order_on_ties_insertion_order(self):
+        # 절대값 동률 시 dict 삽입 순서로 결정됨 (명시적 계약)
+        pulse = {"indicators": {"A": 50, "B": -50, "C": 50}}
+        result = _select_top3_indicators(pulse)
+        assert [r["name"] for r in result] == ["A", "B", "C"]
+
+
+class TestBuildBriefingHero:
+    def test_returns_none_when_store_empty(self):
+        store = MagicMock()
+        store.get_recent.return_value = []
+        assert _build_briefing_hero(store) is None
+
+    @patch("alphapulse.webapp.api.dashboard.Config.get_today_str", return_value="20260422")
+    def test_is_today_true_when_date_matches(self, _today):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1766839200,
+            "payload": {
+                "pulse_result": {"score": 62.5, "signal": "positive", "indicators": {"RSI": 80}},
+                "daily_result_msg": "코스피 강세 흐름.\n외국인 순매수 유입.",
+                "commentary": "상세 해설",
+            },
+        }]
+        result = _build_briefing_hero(store)
+        assert result is not None
+        assert result.is_today is True
+        assert result.date == "20260422"
+        assert result.score == 62.5
+        assert result.signal == "positive"
+        assert result.summary_line == "코스피 강세 흐름."
+        assert result.created_at == 1766839200
+        assert len(result.highlight_badges) == 1
+        assert result.highlight_badges[0].name == "RSI"
+
+    @patch("alphapulse.webapp.api.dashboard.Config.get_today_str", return_value="20260422")
+    def test_is_today_false_when_yesterday(self, _today):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260421",
+            "created_at": 1766752800,
+            "payload": {
+                "pulse_result": {"score": 40.0, "signal": "neutral"},
+                "daily_result_msg": "전일 혼조.",
+                "commentary": None,
+            },
+        }]
+        result = _build_briefing_hero(store)
+        assert result is not None
+        assert result.is_today is False
+        assert result.summary_line == "전일 혼조."
+
+    def test_summary_line_falls_back_to_commentary(self):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1,
+            "payload": {
+                "pulse_result": {"score": 0, "signal": "neutral"},
+                "daily_result_msg": "",
+                "commentary": "첫 문장. 두 번째 문장.",
+            },
+        }]
+        result = _build_briefing_hero(store)
+        assert result.summary_line == "첫 문장."
+
+    def test_summary_line_empty_when_both_missing(self):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1,
+            "payload": {"pulse_result": {"score": 0, "signal": "neutral"}},
+        }]
+        result = _build_briefing_hero(store)
+        assert result.summary_line == ""
+
+
+class TestBuildPulseWidget:
+    def test_empty_returns_none_latest(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = []
+        result = _build_pulse_widget(hist)
+        assert result.latest is None
+        assert result.history7 == []
+
+    def test_latest_is_first_record(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = [
+            {"date": "20260422", "score": 62.5, "signal": "positive"},
+            {"date": "20260421", "score": 30.0, "signal": "neutral"},
+        ]
+        result = _build_pulse_widget(hist)
+        assert result.latest is not None
+        assert result.latest.date == "20260422"
+        assert result.latest.score == 62.5
+
+    def test_history7_reversed_for_chart(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = [
+            {"date": "20260422", "score": 3.0, "signal": "positive"},
+            {"date": "20260421", "score": 2.0, "signal": "neutral"},
+            {"date": "20260420", "score": 1.0, "signal": "negative"},
+        ]
+        result = _build_pulse_widget(hist)
+        # 차트는 과거→현재 순으로 보고 싶어함
+        assert [p.date for p in result.history7] == ["20260420", "20260421", "20260422"]
+
+    def test_days_argument_is_7(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = []
+        _build_pulse_widget(hist)
+        hist.get_recent.assert_called_once_with(days=7)
+
+
+class TestBuildFeedbackWidget:
+    def test_returns_none_when_no_records(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0.0, "hit_rate_3d": 0.0, "hit_rate_5d": 0.0,
+            "total_evaluated": 0,
+        }
+        result = _build_feedback_widget(ev)
+        assert result is None
+
+    def test_hit_rate_maps_from_1d(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0.714, "hit_rate_3d": 0.5, "hit_rate_5d": 0.6,
+            "total_evaluated": 7,
+        }
+        ev.get_indicator_accuracy.return_value = {}
+        result = _build_feedback_widget(ev)
+        assert result is not None
+        assert result.hit_rate_7d == 0.714
+        assert result.top_indicators == []
+
+    def test_top_indicators_limited_to_2_and_ordered_by_accuracy(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0.5, "hit_rate_3d": 0, "hit_rate_5d": 0,
+            "total_evaluated": 10,
+        }
+        ev.get_indicator_accuracy.return_value = {
+            "RSI": {"accuracy": 0.80, "hits": 4, "total": 5},
+            "MA": {"accuracy": 0.60, "hits": 3, "total": 5},
+            "VIX": {"accuracy": 0.90, "hits": 9, "total": 10},
+            "FX_LOWN": {"accuracy": 1.0, "hits": 1, "total": 1},
+            "VOL_LOWN": {"accuracy": 1.0, "hits": 2, "total": 2},
+        }
+        result = _build_feedback_widget(ev)
+        names = [i.name for i in result.top_indicators]
+        assert names == ["VIX", "RSI"]
+        assert result.top_indicators[0].hit_rate == 0.90
+
+    def test_days_argument_is_7(self):
+        ev = MagicMock()
+        ev.get_hit_rates.return_value = {
+            "hit_rate_1d": 0, "hit_rate_3d": 0, "hit_rate_5d": 0,
+            "total_evaluated": 0,
+        }
+        _build_feedback_widget(ev)
+        ev.get_hit_rates.assert_called_once_with(days=7)
+
+
+class TestBuildContentWidget:
+    def test_empty_result_returns_empty_list(self):
+        reader = MagicMock()
+        reader.list_reports.return_value = {
+            "items": [], "total": 0, "page": 1, "size": 3, "categories": [],
+        }
+        result = _build_content_widget(reader)
+        assert result.recent == []
+
+    def test_maps_items_to_recent(self):
+        reader = MagicMock()
+        reader.list_reports.return_value = {
+            "items": [
+                {
+                    "filename": "samsung.md",
+                    "title": "삼성전자 분석",
+                    "category": "기업",
+                    "published": "2026-04-22",
+                    "analyzed_at": "2026-04-22T08:30",
+                },
+                {
+                    "filename": "ai.md",
+                    "title": "AI 테마",
+                    "category": "테마",
+                    "published": "2026-04-21",
+                    "analyzed_at": "2026-04-21T10:00",
+                },
+            ],
+            "total": 2, "page": 1, "size": 3, "categories": ["기업", "테마"],
+        }
+        result = _build_content_widget(reader)
+        assert len(result.recent) == 2
+        assert result.recent[0].filename == "samsung.md"
+        assert result.recent[0].title == "삼성전자 분석"
+        assert result.recent[0].date == "2026-04-22"
+
+    def test_called_with_size_3_newest(self):
+        reader = MagicMock()
+        reader.list_reports.return_value = {
+            "items": [], "total": 0, "page": 1, "size": 3, "categories": [],
+        }
+        _build_content_widget(reader)
+        reader.list_reports.assert_called_once_with(size=3, sort="newest")
+
+
+class TestHomeV2:
+    def test_phase3_fields_present_and_null_when_empty(self, client):
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert "briefing" in body and body["briefing"] is None
+        assert "pulse" in body and body["pulse"] == {"latest": None, "history7": []}
+        assert "feedback" in body and body["feedback"] is None
+        assert "content" in body and body["content"] == {"recent": []}
+
+    def test_removed_legacy_fields(self, client):
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert "recent_backtests" not in body
+        assert "recent_audits" not in body
+
+    def test_briefing_returns_hero_when_present(self, client, app):
+        app.state.briefing_store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1766839200,
+            "payload": {
+                "pulse_result": {"score": 62.5, "signal": "positive", "indicators": {"RSI": 80}},
+                "daily_result_msg": "코스피 강세.\n추가 코멘트.",
+            },
+        }]
+        r = client.get("/api/v1/dashboard/home")
+        body = r.json()
+        assert body["briefing"]["date"] == "20260422"
+        assert body["briefing"]["score"] == 62.5
+        assert body["briefing"]["summary_line"] == "코스피 강세."
+        assert len(body["briefing"]["highlight_badges"]) == 1
+
+    def test_pulse_failure_isolated(self, client, app):
+        app.state.pulse_history.get_recent.side_effect = RuntimeError("boom")
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["pulse"] is None
+        assert body["portfolio"] is not None
+
+    def test_feedback_failure_isolated(self, client, app):
+        app.state.feedback_evaluator.get_hit_rates.side_effect = RuntimeError("x")
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["feedback"] is None
+
+    def test_content_failure_isolated(self, client, app):
+        app.state.content_reader.list_reports.side_effect = OSError("fs")
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["content"] == {"recent": []}
