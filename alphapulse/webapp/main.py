@@ -53,6 +53,9 @@ from alphapulse.webapp.store.webapp_db import init_webapp_db
 
 logger = logging.getLogger(__name__)
 
+# pykrx 로그인 실패 경고는 데이터 수집 시 반복 출력되어 소음이 큼 — 억제.
+logging.getLogger("pykrx").setLevel(logging.ERROR)
+
 
 def create_app(
     backtest_db_path: Optional[Path] = None,
