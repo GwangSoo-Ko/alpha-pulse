@@ -15,6 +15,11 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TELEGRAM_MONITOR_BOT_TOKEN", "")
     monkeypatch.setenv("TELEGRAM_MONITOR_CHANNEL_ID", "")
     monkeypatch.setenv("WEBAPP_DB_PATH", str(tmp_path / "webapp.db"))
+    # 외부 shell 또는 .env 의 WEBAPP_ENCRYPT_KEY 가 누수되지 않도록 빈 문자열로 고정.
+    # load_dotenv(override=False) 는 이미 설정된 env 를 덮어쓰지 않으므로, 빈 문자열이
+    # 최종값이 되어 test_settings_router_absent_without_encrypt_key 가 정상 통과.
+    # 필요 시 개별 테스트가 setenv 로 유효한 키를 덮어씀.
+    monkeypatch.setenv("WEBAPP_ENCRYPT_KEY", "")
     # BacktestStore(db_path) を事前に作成して空DBを用意
     from alphapulse.trading.backtest.store import BacktestStore
 
