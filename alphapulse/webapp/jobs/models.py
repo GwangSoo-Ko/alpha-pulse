@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 JobStatus = Literal["pending", "running", "done", "failed", "cancelled"]
-JobKind = Literal["backtest", "screening", "data_update", "market_pulse", "content_monitor"]
+JobKind = Literal["backtest", "screening", "data_update", "market_pulse", "content_monitor", "briefing"]
 
 
 @dataclass
