@@ -168,16 +168,14 @@ async def run_briefing(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # 중복 running Job 감지 → 재사용
-    existing = jobs.find_running_by_kind_and_date("briefing", target_date)
-    if existing is not None:
-        return RunBriefingResponse(job_id=existing.id, reused=True)
-
+    # 원자적 중복 감지 + 생성 (TOCTOU race 제거)
     job_id = str(uuid.uuid4())
-    jobs.create(
-        job_id=job_id, kind="briefing",
-        params={"date": target_date}, user_id=user.id,
+    job, created = jobs.create_or_return_running_by_kind_and_date(
+        kind="briefing", date=target_date,
+        job_id=job_id, params={"date": target_date}, user_id=user.id,
     )
+    if not created:
+        return RunBriefingResponse(job_id=job.id, reused=True)
     try:
         request.app.state.audit.log(
             "webapp.briefing.run",

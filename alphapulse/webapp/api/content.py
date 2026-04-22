@@ -130,16 +130,14 @@ async def run_monitor(
     jobs: JobRepository = Depends(get_jobs),
     runner: JobRunner = Depends(get_runner),
 ):
-    # 중복 running Job 감지 → 재사용 (kind 만으로 감지, 날짜 무관)
-    existing = jobs.find_running_by_kind("content_monitor")
-    if existing is not None:
-        return MonitorRunResponse(job_id=existing.id, reused=True)
-
+    # 원자적 중복 감지 + 생성 (TOCTOU race 제거)
     job_id = str(uuid.uuid4())
-    jobs.create(
-        job_id=job_id, kind="content_monitor",
-        params={}, user_id=user.id,
+    job, created = jobs.create_or_return_running_by_kind(
+        kind="content_monitor",
+        job_id=job_id, params={}, user_id=user.id,
     )
+    if not created:
+        return MonitorRunResponse(job_id=job.id, reused=True)
     try:
         request.app.state.audit.log(
             "webapp.content.monitor.run",
