@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel
 
+from alphapulse.core.config import Config
 from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.webapp.auth.deps import get_current_user
+from alphapulse.webapp.jobs.runner import JobRunner
+from alphapulse.webapp.services.briefing_runner import run_briefing_async
 from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.users import User
 
@@ -60,6 +65,18 @@ def get_briefing_store(request: Request) -> BriefingStore:
 
 def get_jobs(request: Request) -> JobRepository:
     return request.app.state.jobs
+
+
+def get_runner(request: Request) -> JobRunner:
+    return request.app.state.job_runner
+
+
+def _resolve_target_date(date: str | None) -> str:
+    """None 이면 오늘, 있으면 Config.parse_date 로 정규화."""
+    if date:
+        return Config.parse_date(date)
+    from datetime import datetime
+    return datetime.now().strftime("%Y%m%d")
 
 
 def _row_to_summary(row: dict) -> BriefingSummary:
@@ -135,3 +152,48 @@ async def get_briefing(
     if row is None:
         raise HTTPException(status_code=404, detail=f"Briefing not found for {date}")
     return _row_to_detail(row)
+
+
+@router.post("/run", response_model=RunBriefingResponse)
+async def run_briefing(
+    body: RunBriefingRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    jobs: JobRepository = Depends(get_jobs),
+    runner: JobRunner = Depends(get_runner),
+):
+    try:
+        target_date = _resolve_target_date(body.date)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    # 중복 running Job 감지 → 재사용
+    existing = jobs.find_running_by_kind_and_date("briefing", target_date)
+    if existing is not None:
+        return RunBriefingResponse(job_id=existing.id, reused=True)
+
+    job_id = str(uuid.uuid4())
+    jobs.create(
+        job_id=job_id, kind="briefing",
+        params={"date": target_date}, user_id=user.id,
+    )
+    try:
+        request.app.state.audit.log(
+            "webapp.briefing.run",
+            component="webapp",
+            data={"user_id": user.id, "job_id": job_id, "date": target_date},
+            mode="live",
+        )
+    except AttributeError:
+        pass
+
+    async def _run():
+        await runner.run(
+            job_id,
+            run_briefing_async,
+            date=target_date,
+        )
+
+    background_tasks.add_task(_run)
+    return RunBriefingResponse(job_id=job_id, reused=False)

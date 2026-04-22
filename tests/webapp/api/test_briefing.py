@@ -170,3 +170,78 @@ def test_detail_requires_auth(app):
     c = TestClient(app, base_url="https://testserver")
     r = c.get("/api/v1/briefings/20260421")
     assert r.status_code == 401
+
+
+def test_run_creates_job_and_returns_id(client, monkeypatch):
+    """POST /run → BackgroundTasks 스케줄, reused=false."""
+    async def fake_run(self, job_id, func, **kwargs):
+        pass
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", fake_run,
+    )
+    r = client.post("/api/v1/briefings/run", json={"date": "20260421"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reused"] is False
+    assert "job_id" in body
+
+
+def test_run_reuses_existing_job(client, app, monkeypatch):
+    """같은 date 의 running Job 있으면 그 id 반환."""
+    app.state.jobs.create(
+        job_id="existing", kind="briefing",
+        params={"date": "20260421"}, user_id=1,
+    )
+    app.state.jobs.update_status("existing", "running")
+
+    async def fake_run(self, job_id, func, **kwargs):
+        raise AssertionError("should not be called")
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", fake_run,
+    )
+    r = client.post("/api/v1/briefings/run", json={"date": "20260421"})
+    body = r.json()
+    assert body["job_id"] == "existing"
+    assert body["reused"] is True
+
+
+def test_run_with_null_date_resolves_via_helper(client, app, monkeypatch):
+    """date=None → _resolve_target_date 호출, params.date 에 저장."""
+    monkeypatch.setattr(
+        "alphapulse.webapp.api.briefing._resolve_target_date",
+        lambda d: "20260422",
+    )
+    async def noop(self, *a, **kw):
+        pass
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", noop,
+    )
+    r = client.post("/api/v1/briefings/run", json={})
+    assert r.status_code == 200
+    job_id = r.json()["job_id"]
+    saved = app.state.jobs.get(job_id)
+    assert saved is not None
+    assert saved.params.get("date") == "20260422"
+
+
+def test_run_rejects_invalid_date_with_422(client):
+    """잘못된 date 입력은 422 반환 (not 500)."""
+    r = client.post("/api/v1/briefings/run", json={"date": "not-a-date"})
+    assert r.status_code == 422
+
+
+def test_run_audit_log(client, app, monkeypatch):
+    async def noop(self, *a, **kw):
+        pass
+    monkeypatch.setattr(
+        "alphapulse.webapp.jobs.runner.JobRunner.run", noop,
+    )
+    r = client.post("/api/v1/briefings/run", json={"date": "20260421"})
+    assert r.status_code == 200
+    assert app.state.audit.log.called
+    call = app.state.audit.log.call_args
+    assert call.args[0] == "webapp.briefing.run"
+    data = call.kwargs.get("data", {})
+    assert "user_id" in data
+    assert "job_id" in data
+    assert data.get("date") == "20260421"
