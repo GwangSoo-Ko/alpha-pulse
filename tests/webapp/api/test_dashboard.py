@@ -5,6 +5,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from alphapulse.webapp.api.dashboard import _select_top3_indicators
 from alphapulse.webapp.api.dashboard import router as dash_router
 from alphapulse.webapp.auth.routes import router as auth_router
 from alphapulse.webapp.auth.security import hash_password
@@ -107,9 +108,6 @@ class TestHome:
         assert r.status_code == 401
 
 
-from alphapulse.webapp.api.dashboard import _select_top3_indicators  # noqa: E402
-
-
 class TestSelectTop3Indicators:
     def test_returns_empty_when_no_keys(self):
         assert _select_top3_indicators({}) == []
@@ -154,3 +152,13 @@ class TestSelectTop3Indicators:
         pulse = {"indicators": {"X": 70, "Y": -20, "Z": 55}}
         result = _select_top3_indicators(pulse)
         assert [r["name"] for r in result] == ["X", "Z", "Y"]
+
+    def test_returns_empty_when_source_is_not_dict(self):
+        # "indicators" 키가 있지만 dict 가 아닐 때 안전하게 빈 리스트
+        assert _select_top3_indicators({"indicators": "not-a-dict"}) == []
+
+    def test_stable_order_on_ties_insertion_order(self):
+        # 절대값 동률 시 dict 삽입 순서로 결정됨 (명시적 계약)
+        pulse = {"indicators": {"A": 50, "B": -50, "C": 50}}
+        result = _select_top3_indicators(pulse)
+        assert [r["name"] for r in result] == ["A", "B", "C"]
