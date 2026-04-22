@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from alphapulse.core.config import Config
 from alphapulse.core.storage.briefings import BriefingStore
+from alphapulse.core.storage.history import PulseHistory
 from alphapulse.webapp.auth.deps import get_current_user
 from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
@@ -150,6 +151,29 @@ def _build_briefing_hero(store: BriefingStore) -> BriefingHeroData | None:
         highlight_badges=badges,
         is_today=(str(record["date"]) == today),
     )
+
+
+def _build_pulse_widget(history: PulseHistory) -> PulseWidgetData:
+    """최근 7일 Pulse 이력을 위젯 데이터로 변환한다."""
+    records = history.get_recent(days=7)
+    if not records:
+        return PulseWidgetData(latest=None, history7=[])
+
+    latest = PulseLatest(
+        date=str(records[0]["date"]),
+        score=float(records[0]["score"]),
+        signal=str(records[0]["signal"]),
+    )
+    chronological = list(reversed(records))
+    history7 = [
+        PulseHistoryPoint(
+            date=str(r["date"]),
+            score=float(r["score"]),
+            signal=str(r["signal"]),
+        )
+        for r in chronological
+    ]
+    return PulseWidgetData(latest=latest, history7=history7)
 
 
 def get_portfolio(request: Request) -> PortfolioReader:

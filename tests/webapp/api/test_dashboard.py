@@ -5,7 +5,11 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from alphapulse.webapp.api.dashboard import _build_briefing_hero, _select_top3_indicators
+from alphapulse.webapp.api.dashboard import (
+    _build_briefing_hero,
+    _build_pulse_widget,
+    _select_top3_indicators,
+)
 from alphapulse.webapp.api.dashboard import router as dash_router
 from alphapulse.webapp.auth.routes import router as auth_router
 from alphapulse.webapp.auth.security import hash_password
@@ -233,3 +237,40 @@ class TestBuildBriefingHero:
         }]
         result = _build_briefing_hero(store)
         assert result.summary_line == ""
+
+
+class TestBuildPulseWidget:
+    def test_empty_returns_none_latest(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = []
+        result = _build_pulse_widget(hist)
+        assert result.latest is None
+        assert result.history7 == []
+
+    def test_latest_is_first_record(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = [
+            {"date": "20260422", "score": 62.5, "signal": "positive"},
+            {"date": "20260421", "score": 30.0, "signal": "neutral"},
+        ]
+        result = _build_pulse_widget(hist)
+        assert result.latest is not None
+        assert result.latest.date == "20260422"
+        assert result.latest.score == 62.5
+
+    def test_history7_reversed_for_chart(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = [
+            {"date": "20260422", "score": 3.0, "signal": "positive"},
+            {"date": "20260421", "score": 2.0, "signal": "neutral"},
+            {"date": "20260420", "score": 1.0, "signal": "negative"},
+        ]
+        result = _build_pulse_widget(hist)
+        # 차트는 과거→현재 순으로 보고 싶어함
+        assert [p.date for p in result.history7] == ["20260420", "20260421", "20260422"]
+
+    def test_days_argument_is_7(self):
+        hist = MagicMock()
+        hist.get_recent.return_value = []
+        _build_pulse_widget(hist)
+        hist.get_recent.assert_called_once_with(days=7)
