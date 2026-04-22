@@ -28,6 +28,15 @@ function safeEncode(name: string): string {
   return encodeURIComponent(decoded)
 }
 
+// 상단에 원문 링크 버튼이 있으므로 본문 말미의 "<details>원문 전문</details>"
+// 블록은 중복. 웹 UI 에서만 잘라내어 AI 분석 내용만 노출한다.
+// (ReportWriter 의 파일 저장 포맷은 유지 — CLI 사용자는 영향 없음.)
+function stripOriginalSection(body: string): string {
+  const idx = body.indexOf("<details>")
+  if (idx < 0) return body
+  return body.slice(0, idx).replace(/\n*---\s*\n*$/, "").trimEnd()
+}
+
 export default async function ReportDetailPage({ params }: Props) {
   const { filename } = await params
   const cookieStore = await cookies()
@@ -64,7 +73,7 @@ export default async function ReportDetailPage({ params }: Props) {
             )}
           </div>
         </header>
-        <ReportMarkdownView body={detail.body} />
+        <ReportMarkdownView body={stripOriginalSection(detail.body)} />
       </div>
     )
   } catch (e) {
