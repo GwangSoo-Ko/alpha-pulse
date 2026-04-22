@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
@@ -10,25 +12,25 @@ from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.core.storage.history import PulseHistory
 from alphapulse.feedback.evaluator import FeedbackEvaluator
 from alphapulse.webapp.auth.deps import get_current_user
-from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.content import ContentReader
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
 from alphapulse.webapp.store.readers.portfolio import PortfolioReader
 from alphapulse.webapp.store.readers.risk import RiskReader
 from alphapulse.webapp.store.users import User
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
 
 
 class HighlightBadge(BaseModel):
     name: str
-    direction: str   # up | down | neutral
-    sentiment: str   # positive | negative | neutral
+    direction: str
+    sentiment: str
 
 
 class BriefingHeroData(BaseModel):
-    date: str                          # YYYYMMDD
-    created_at: int                    # epoch seconds
+    date: str
+    created_at: int
     score: float
     signal: str
     summary_line: str
@@ -74,24 +76,20 @@ class ContentWidgetData(BaseModel):
 
 
 class HomeResponse(BaseModel):
+    briefing: BriefingHeroData | None
+    pulse: PulseWidgetData | None
+    feedback: FeedbackWidgetData | None
+    content: ContentWidgetData
     portfolio: dict | None
     portfolio_history: list
     risk: dict | None
     data_status: dict
-    recent_backtests: list
-    recent_audits: list
 
 
 def _select_top3_indicators(pulse_result: dict) -> list[dict]:
-    """pulse_result 의 지표 목록에서 score 절대값 TOP3 을 반환한다.
-
-    indicator_descriptions 가 있으면 우선 사용, 없으면 indicators 사용.
-    각 지표의 value 는 `{score: float}` 또는 scalar 숫자 둘 다 허용.
-    """
     source = pulse_result.get("indicator_descriptions") or pulse_result.get("indicators")
     if not isinstance(source, dict) or not source:
         return []
-
     scored: list[tuple[str, float]] = []
     for name, value in source.items():
         if isinstance(value, dict):
@@ -105,12 +103,9 @@ def _select_top3_indicators(pulse_result: dict) -> list[dict]:
         except (TypeError, ValueError):
             continue
         scored.append((name, score))
-
     scored.sort(key=lambda t: abs(t[1]), reverse=True)
-    top = scored[:3]
-
     result: list[dict] = []
-    for name, score in top:
+    for name, score in scored[:3]:
         if score > 0:
             direction, sentiment = "up", "positive"
         elif score < 0:
@@ -122,7 +117,6 @@ def _select_top3_indicators(pulse_result: dict) -> list[dict]:
 
 
 def _build_briefing_hero(store: BriefingStore) -> BriefingHeroData | None:
-    """최신 브리핑 한 건을 `BriefingHeroData` 로 변환한다. 없으면 None."""
     records = store.get_recent(days=1)
     if not records:
         return None
@@ -156,11 +150,9 @@ def _build_briefing_hero(store: BriefingStore) -> BriefingHeroData | None:
 
 
 def _build_pulse_widget(history: PulseHistory) -> PulseWidgetData:
-    """최근 7일 Pulse 이력을 위젯 데이터로 변환한다."""
     records = history.get_recent(days=7)
     if not records:
         return PulseWidgetData(latest=None, history7=[])
-
     latest = PulseLatest(
         date=str(records[0]["date"]),
         score=float(records[0]["score"]),
@@ -179,11 +171,9 @@ def _build_pulse_widget(history: PulseHistory) -> PulseWidgetData:
 
 
 def _build_feedback_widget(evaluator: FeedbackEvaluator) -> FeedbackWidgetData | None:
-    """최근 7일 피드백 요약 (적중률 + 지표 TOP2)."""
     rates = evaluator.get_hit_rates(days=7)
     if rates.get("total_evaluated", 0) == 0:
         return None
-
     acc = evaluator.get_indicator_accuracy(days=7, threshold=50.0)
     qualified = [
         (name, float(v["accuracy"]))
@@ -191,16 +181,13 @@ def _build_feedback_widget(evaluator: FeedbackEvaluator) -> FeedbackWidgetData |
         if v.get("total", 0) >= 3
     ]
     qualified.sort(key=lambda t: t[1], reverse=True)
-    top = qualified[:2]
-
     return FeedbackWidgetData(
         hit_rate_7d=float(rates.get("hit_rate_1d", 0.0)),
-        top_indicators=[FeedbackIndicator(name=n, hit_rate=r) for n, r in top],
+        top_indicators=[FeedbackIndicator(name=n, hit_rate=r) for n, r in qualified[:2]],
     )
 
 
 def _build_content_widget(reader: ContentReader) -> ContentWidgetData:
-    """최근 3건 리포트를 위젯 데이터로 변환한다."""
     result = reader.list_reports(size=3, sort="newest")
     items = result.get("items", [])
     recent = [
@@ -226,35 +213,90 @@ def get_data(request: Request) -> DataStatusReader:
     return request.app.state.data_status_reader
 
 
-def get_audit(request: Request) -> AuditReader:
-    return request.app.state.audit_reader
+def get_briefing_store(request: Request) -> BriefingStore:
+    return request.app.state.briefing_store
+
+
+def get_pulse_history(request: Request) -> PulseHistory:
+    return request.app.state.pulse_history
+
+
+def get_feedback_evaluator(request: Request) -> FeedbackEvaluator:
+    return request.app.state.feedback_evaluator
+
+
+def get_content_reader(request: Request) -> ContentReader:
+    return request.app.state.content_reader
 
 
 @router.get("/home", response_model=HomeResponse)
 async def home(
-    request: Request,
     _: User = Depends(get_current_user),
     portfolio: PortfolioReader = Depends(get_portfolio),
     risk: RiskReader = Depends(get_risk),
     data: DataStatusReader = Depends(get_data),
-    audit: AuditReader = Depends(get_audit),
+    briefing_store: BriefingStore = Depends(get_briefing_store),
+    pulse_history: PulseHistory = Depends(get_pulse_history),
+    feedback_evaluator: FeedbackEvaluator = Depends(get_feedback_evaluator),
+    content_reader: ContentReader = Depends(get_content_reader),
 ):
     mode = "paper"
-    snap = portfolio.get_latest(mode=mode)
-    history = portfolio.get_history(mode=mode, days=30)
-    risk_data = risk.get_report(mode=mode) if snap else None
-    bt_store = request.app.state.backtest_reader
-    recent_bt = bt_store.list_runs(page=1, size=3)
-    audit_result = audit.query(page=1, size=10)
 
-    return HomeResponse(
-        portfolio=snap.__dict__ if snap else None,
-        portfolio_history=[s.__dict__ for s in history],
-        risk=risk_data,
-        data_status={
+    briefing = None
+    try:
+        briefing = _build_briefing_hero(briefing_store)
+    except Exception as e:
+        logger.warning("home: briefing fetch failed: %s", e)
+
+    pulse = None
+    try:
+        pulse = _build_pulse_widget(pulse_history)
+    except Exception as e:
+        logger.warning("home: pulse fetch failed: %s", e)
+
+    feedback = None
+    try:
+        feedback = _build_feedback_widget(feedback_evaluator)
+    except Exception as e:
+        logger.warning("home: feedback fetch failed: %s", e)
+
+    content = ContentWidgetData(recent=[])
+    try:
+        content = _build_content_widget(content_reader)
+    except Exception as e:
+        logger.warning("home: content fetch failed: %s", e)
+
+    portfolio_snap = None
+    portfolio_hist: list = []
+    try:
+        portfolio_snap = portfolio.get_latest(mode=mode)
+        portfolio_hist = portfolio.get_history(mode=mode, days=30)
+    except Exception as e:
+        logger.warning("home: portfolio fetch failed: %s", e)
+
+    risk_data = None
+    if portfolio_snap is not None:
+        try:
+            risk_data = risk.get_report(mode=mode)
+        except Exception as e:
+            logger.warning("home: risk fetch failed: %s", e)
+
+    data_status_data: dict = {"tables": [], "gaps_count": 0}
+    try:
+        data_status_data = {
             "tables": [t.__dict__ for t in data.get_status()],
             "gaps_count": len(data.detect_gaps(days=5)),
-        },
-        recent_backtests=[s.__dict__ for s in recent_bt.items],
-        recent_audits=[e.__dict__ for e in audit_result["items"]],
+        }
+    except Exception as e:
+        logger.warning("home: data_status fetch failed: %s", e)
+
+    return HomeResponse(
+        briefing=briefing,
+        pulse=pulse,
+        feedback=feedback,
+        content=content,
+        portfolio=portfolio_snap.__dict__ if portfolio_snap else None,
+        portfolio_history=[s.__dict__ for s in portfolio_hist],
+        risk=risk_data,
+        data_status=data_status_data,
     )

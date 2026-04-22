@@ -69,6 +69,29 @@ def app(webapp_db):  # noqa: PLR0915
     bt.list_runs.return_value = listing
     app.state.backtest_reader = bt
 
+    # Phase 3 readers (신규)
+    briefing_store = MagicMock()
+    briefing_store.get_recent.return_value = []
+    app.state.briefing_store = briefing_store
+
+    pulse_history = MagicMock()
+    pulse_history.get_recent.return_value = []
+    app.state.pulse_history = pulse_history
+
+    feedback_evaluator = MagicMock()
+    feedback_evaluator.get_hit_rates.return_value = {
+        "hit_rate_1d": 0.0, "hit_rate_3d": 0.0, "hit_rate_5d": 0.0,
+        "total_evaluated": 0,
+    }
+    feedback_evaluator.get_indicator_accuracy.return_value = {}
+    app.state.feedback_evaluator = feedback_evaluator
+
+    content_reader = MagicMock()
+    content_reader.list_reports.return_value = {
+        "items": [], "total": 0, "page": 1, "size": 3, "categories": [],
+    }
+    app.state.content_reader = content_reader
+
     app.state.users.create(
         email="a@x.com",
         password_hash=hash_password("long-enough-pw!"),
@@ -106,6 +129,11 @@ class TestHome:
         assert body["portfolio"]["total_value"] == 100_000_000
         assert body["risk"]["report"]["var_95"] == -2.5
         assert "tables" in body["data_status"]
+        # 신규 필드 존재
+        assert "briefing" in body
+        assert "pulse" in body
+        assert "feedback" in body
+        assert "content" in body
 
     def test_requires_auth(self, app):
         r = TestClient(app, base_url="https://testserver").get(
@@ -371,3 +399,59 @@ class TestBuildContentWidget:
         }
         _build_content_widget(reader)
         reader.list_reports.assert_called_once_with(size=3, sort="newest")
+
+
+class TestHomeV2:
+    def test_phase3_fields_present_and_null_when_empty(self, client):
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert "briefing" in body and body["briefing"] is None
+        assert "pulse" in body and body["pulse"] == {"latest": None, "history7": []}
+        assert "feedback" in body and body["feedback"] is None
+        assert "content" in body and body["content"] == {"recent": []}
+
+    def test_removed_legacy_fields(self, client):
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert "recent_backtests" not in body
+        assert "recent_audits" not in body
+
+    def test_briefing_returns_hero_when_present(self, client, app):
+        app.state.briefing_store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1766839200,
+            "payload": {
+                "pulse_result": {"score": 62.5, "signal": "positive", "indicators": {"RSI": 80}},
+                "daily_result_msg": "코스피 강세.\n추가 코멘트.",
+            },
+        }]
+        r = client.get("/api/v1/dashboard/home")
+        body = r.json()
+        assert body["briefing"]["date"] == "20260422"
+        assert body["briefing"]["score"] == 62.5
+        assert body["briefing"]["summary_line"] == "코스피 강세."
+        assert len(body["briefing"]["highlight_badges"]) == 1
+
+    def test_pulse_failure_isolated(self, client, app):
+        app.state.pulse_history.get_recent.side_effect = RuntimeError("boom")
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["pulse"] is None
+        assert body["portfolio"] is not None
+
+    def test_feedback_failure_isolated(self, client, app):
+        app.state.feedback_evaluator.get_hit_rates.side_effect = RuntimeError("x")
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["feedback"] is None
+
+    def test_content_failure_isolated(self, client, app):
+        app.state.content_reader.list_reports.side_effect = OSError("fs")
+        r = client.get("/api/v1/dashboard/home")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["content"] == {"recent": []}
