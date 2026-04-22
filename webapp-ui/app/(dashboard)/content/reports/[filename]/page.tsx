@@ -20,6 +20,14 @@ type ReportDetail = {
   body: string
 }
 
+// Next.js 15 dynamic route params 에는 URL-encoded 또는 decoded 가 혼재해
+// 올 수 있음. decode → encode 로 정규화 idempotent 처리.
+function safeEncode(name: string): string {
+  let decoded = name
+  try { decoded = decodeURIComponent(name) } catch { decoded = name }
+  return encodeURIComponent(decoded)
+}
+
 export default async function ReportDetailPage({ params }: Props) {
   const { filename } = await params
   const cookieStore = await cookies()
@@ -29,7 +37,7 @@ export default async function ReportDetailPage({ params }: Props) {
 
   try {
     const detail = await apiFetch<ReportDetail>(
-      `/api/v1/content/reports/${encodeURIComponent(filename)}`,
+      `/api/v1/content/reports/${safeEncode(filename)}`,
       { headers: h, cache: "no-store" },
     )
     return (
