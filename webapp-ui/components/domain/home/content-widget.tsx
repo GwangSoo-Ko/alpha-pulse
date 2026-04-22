@@ -16,7 +16,7 @@ export function ContentWidget({ data }: { data: ContentData }) {
           <ul className="space-y-2">
             {data.recent.map((r) => (
               <li key={r.filename} className="text-sm">
-                <div className="text-neutral-200 truncate" title={r.title}>📄 {r.title}</div>
+                <div className="text-neutral-200 truncate" title={r.title}>{r.title}</div>
                 <div className="text-[10px] text-neutral-500">{r.date}</div>
               </li>
             ))}

@@ -9,12 +9,6 @@ export type PulseData = {
   history7: PulsePoint[]
 }
 
-function barColor(signal: string): string {
-  if (signal === "positive") return "bg-emerald-500"
-  if (signal === "negative") return "bg-rose-500"
-  return "bg-amber-500"
-}
-
 export function PulseWidget({ data }: { data: PulseData | null }) {
   if (!data || data.latest === null) {
     return (
@@ -44,7 +38,7 @@ export function PulseWidget({ data }: { data: PulseData | null }) {
             return (
               <div
                 key={p.date}
-                className={`flex-1 rounded-sm ${barColor(p.signal)}`}
+                className={`flex-1 rounded-sm ${signalStyle(p.signal).bar}`}
                 style={{ height: `${height}%` }}
                 title={`${p.date}: ${p.score.toFixed(1)}`}
               />
