@@ -44,10 +44,8 @@ class BriefingStore:
 
     def save(self, date: str, payload: dict) -> None:
         """UPSERT. payload 안의 numpy/비직렬화 타입은 sanitize 된다."""
-        # Round-trip 으로 sanitize 보장 (저장값과 읽은값이 동일하도록)
-        safe_text = _to_json_safe(payload)
-        safe_payload = json.loads(safe_text)
-        final_text = json.dumps(safe_payload, ensure_ascii=False)
+        # _to_json_safe 가 이미 모든 비 JSON 타입을 정규화하므로 단일 dump 로 충분
+        final_text = _to_json_safe(payload)
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
