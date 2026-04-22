@@ -140,6 +140,24 @@ class HomeResponse(BaseModel):
     data_status: DataStatusData
 
 
+def _score_to_signal_key(score: float) -> str:
+    """score 값 → SignalLevel enum key (FE market-labels 의 scoreToSignal 과 대칭).
+
+    백엔드 DB 에는 Korean 라벨("강한 매수 (Strong Bullish)")로 저장되어 있으나,
+    FE 는 enum key("strong_bullish")로 스타일 매칭한다. API 응답에서는 키로
+    변환해 내린다. 기준: Config.SIGNAL_THRESHOLDS 와 일치.
+    """
+    if score >= 60:
+        return "strong_bullish"
+    if score >= 20:
+        return "moderately_bullish"
+    if score >= -19:
+        return "neutral"
+    if score >= -59:
+        return "moderately_bearish"
+    return "strong_bearish"
+
+
 def _select_top3_indicators(pulse_result: dict) -> list[dict]:
     source = pulse_result.get("indicator_descriptions") or pulse_result.get("indicators")
     if not isinstance(source, dict) or not source:
@@ -179,7 +197,8 @@ def _build_briefing_hero(store: BriefingStore) -> BriefingHeroData | None:
     pulse_result = payload.get("pulse_result") or {}
 
     score = float(pulse_result.get("score", 0.0))
-    signal = str(pulse_result.get("signal", "neutral"))
+    # DB 에 저장된 signal 은 Korean 라벨 → 항상 score 기반 enum key 로 재계산
+    signal = _score_to_signal_key(score)
 
     daily = payload.get("daily_result_msg") or ""
     first_line = daily.split("\n", 1)[0].strip() if daily else ""
@@ -207,17 +226,18 @@ def _build_pulse_widget(history: PulseHistory) -> PulseWidgetData:
     records = history.get_recent(days=7)
     if not records:
         return PulseWidgetData(latest=None, history7=[])
+    latest_score = float(records[0]["score"])
     latest = PulseLatest(
         date=str(records[0]["date"]),
-        score=float(records[0]["score"]),
-        signal=str(records[0]["signal"]),
+        score=latest_score,
+        signal=_score_to_signal_key(latest_score),
     )
     chronological = list(reversed(records))
     history7 = [
         PulseHistoryPoint(
             date=str(r["date"]),
             score=float(r["score"]),
-            signal=str(r["signal"]),
+            signal=_score_to_signal_key(float(r["score"])),
         )
         for r in chronological
     ]
