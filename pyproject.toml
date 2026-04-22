@@ -13,7 +13,7 @@ dependencies = [
     # setuptools 80+ 는 top-level pkg_resources 제거 → <80 으로 고정
     "setuptools>=70,<80",
     # KMP dependencies
-    "pykrx>=1.0.45",
+    "pykrx>=1.2.7",
     "finance-datareader>=0.9.90",
     "pandas>=2.0",
     "numpy>=1.24",

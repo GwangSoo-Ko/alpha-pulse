@@ -32,43 +32,46 @@ class FeedbackCollector:
         db = db_path or (self.config.DATA_DIR / "feedback.db")
         self.store = FeedbackStore(db)
 
-    def _get_kospi_data(self, date: str) -> dict:
-        """KOSPI 종가/등락률 수집 (pykrx)."""
-        try:
-            from pykrx import stock
+    def _get_index_data(self, date: str, symbol: str, label: str) -> dict:
+        """지수 종가/등락률 수집 (FinanceDataReader Yahoo 백엔드).
 
-            df = stock.get_index_ohlcv_by_date(date, date, "1001")  # KOSPI
+        pykrx 1.2.x 는 KRX 로그인 요구하고 KOSPI/KOSDAQ 지수 조회 시 '지수명'
+        KeyError 발생. FDR 의 Yahoo 백엔드(^KS11/^KQ11)는 인증 불필요.
+        """
+        try:
+            import FinanceDataReader as fdr
+
+            # FDR 은 YYYY-MM-DD 형식을 받음
+            iso = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+            df = fdr.DataReader(symbol, iso, iso)
             if not df.empty:
-                close = float(df["종가"].iloc[-1])
-                change = float(df["등락률"].iloc[-1])
-                return {"close": close, "change_pct": change}
+                close = float(df["Close"].iloc[-1])
+                open_ = float(df["Open"].iloc[-1])
+                change_pct = (close / open_ - 1) * 100 if open_ else 0.0
+                return {"close": close, "change_pct": round(change_pct, 2)}
         except Exception as e:
-            logger.warning(f"KOSPI 데이터 수집 실패 ({date}): {e}")
+            logger.warning(f"{label} 데이터 수집 실패 ({date}): {e}")
         return {"close": None, "change_pct": None}
+
+    def _get_kospi_data(self, date: str) -> dict:
+        """KOSPI 종가/등락률 수집."""
+        return self._get_index_data(date, "^KS11", "KOSPI")
 
     def _get_kosdaq_data(self, date: str) -> dict:
-        """KOSDAQ 종가/등락률 수집 (pykrx)."""
-        try:
-            from pykrx import stock
-
-            df = stock.get_index_ohlcv_by_date(date, date, "2001")  # KOSDAQ
-            if not df.empty:
-                close = float(df["종가"].iloc[-1])
-                change = float(df["등락률"].iloc[-1])
-                return {"close": close, "change_pct": change}
-        except Exception as e:
-            logger.warning(f"KOSDAQ 데이터 수집 실패 ({date}): {e}")
-        return {"close": None, "change_pct": None}
+        """KOSDAQ 종가/등락률 수집."""
+        return self._get_index_data(date, "^KQ11", "KOSDAQ")
 
     def _get_kospi_close_series(self, start: str, end: str) -> dict:
         """기간 내 KOSPI 일별 종가 dict (YYYYMMDD -> float)."""
         try:
-            from pykrx import stock
+            import FinanceDataReader as fdr
 
-            df = stock.get_index_ohlcv_by_date(start, end, "1001")
+            start_iso = f"{start[:4]}-{start[4:6]}-{start[6:]}"
+            end_iso = f"{end[:4]}-{end[4:6]}-{end[6:]}"
+            df = fdr.DataReader("^KS11", start_iso, end_iso)
             if not df.empty:
                 return {
-                    d.strftime("%Y%m%d"): float(row["종가"])
+                    d.strftime("%Y%m%d"): float(row["Close"])
                     for d, row in df.iterrows()
                 }
         except Exception as e:
