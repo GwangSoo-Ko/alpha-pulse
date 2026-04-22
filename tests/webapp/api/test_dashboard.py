@@ -1,11 +1,11 @@
 """Dashboard home API — aggregation."""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from alphapulse.webapp.api.dashboard import _select_top3_indicators
+from alphapulse.webapp.api.dashboard import _build_briefing_hero, _select_top3_indicators
 from alphapulse.webapp.api.dashboard import router as dash_router
 from alphapulse.webapp.auth.routes import router as auth_router
 from alphapulse.webapp.auth.security import hash_password
@@ -162,3 +162,74 @@ class TestSelectTop3Indicators:
         pulse = {"indicators": {"A": 50, "B": -50, "C": 50}}
         result = _select_top3_indicators(pulse)
         assert [r["name"] for r in result] == ["A", "B", "C"]
+
+
+class TestBuildBriefingHero:
+    def test_returns_none_when_store_empty(self):
+        store = MagicMock()
+        store.get_recent.return_value = []
+        assert _build_briefing_hero(store) is None
+
+    @patch("alphapulse.webapp.api.dashboard.Config.get_today_str", return_value="20260422")
+    def test_is_today_true_when_date_matches(self, _today):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1766839200,
+            "payload": {
+                "pulse_result": {"score": 62.5, "signal": "positive", "indicators": {"RSI": 80}},
+                "daily_result_msg": "코스피 강세 흐름.\n외국인 순매수 유입.",
+                "commentary": "상세 해설",
+            },
+        }]
+        result = _build_briefing_hero(store)
+        assert result is not None
+        assert result.is_today is True
+        assert result.date == "20260422"
+        assert result.score == 62.5
+        assert result.signal == "positive"
+        assert result.summary_line == "코스피 강세 흐름."
+        assert result.created_at == 1766839200
+        assert len(result.highlight_badges) == 1
+        assert result.highlight_badges[0].name == "RSI"
+
+    @patch("alphapulse.webapp.api.dashboard.Config.get_today_str", return_value="20260422")
+    def test_is_today_false_when_yesterday(self, _today):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260421",
+            "created_at": 1766752800,
+            "payload": {
+                "pulse_result": {"score": 40.0, "signal": "neutral"},
+                "daily_result_msg": "전일 혼조.",
+                "commentary": None,
+            },
+        }]
+        result = _build_briefing_hero(store)
+        assert result is not None
+        assert result.is_today is False
+        assert result.summary_line == "전일 혼조."
+
+    def test_summary_line_falls_back_to_commentary(self):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1,
+            "payload": {
+                "pulse_result": {"score": 0, "signal": "neutral"},
+                "daily_result_msg": "",
+                "commentary": "첫 문장. 두 번째 문장.",
+            },
+        }]
+        result = _build_briefing_hero(store)
+        assert result.summary_line == "첫 문장."
+
+    def test_summary_line_empty_when_both_missing(self):
+        store = MagicMock()
+        store.get_recent.return_value = [{
+            "date": "20260422",
+            "created_at": 1,
+            "payload": {"pulse_result": {"score": 0, "signal": "neutral"}},
+        }]
+        result = _build_briefing_hero(store)
+        assert result.summary_line == ""

@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from alphapulse.core.config import Config
+from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.webapp.auth.deps import get_current_user
 from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.data_status import DataStatusReader
@@ -114,6 +116,40 @@ def _select_top3_indicators(pulse_result: dict) -> list[dict]:
             direction, sentiment = "neutral", "neutral"
         result.append({"name": name, "direction": direction, "sentiment": sentiment})
     return result
+
+
+def _build_briefing_hero(store: BriefingStore) -> BriefingHeroData | None:
+    """최신 브리핑 한 건을 `BriefingHeroData` 로 변환한다. 없으면 None."""
+    records = store.get_recent(days=1)
+    if not records:
+        return None
+    record = records[0]
+    payload = record.get("payload") or {}
+    pulse_result = payload.get("pulse_result") or {}
+
+    score = float(pulse_result.get("score", 0.0))
+    signal = str(pulse_result.get("signal", "neutral"))
+
+    daily = payload.get("daily_result_msg") or ""
+    first_line = daily.split("\n", 1)[0].strip() if daily else ""
+    if not first_line:
+        commentary = payload.get("commentary") or ""
+        first_line = commentary.split(".", 1)[0].strip()
+        if first_line:
+            first_line += "."
+
+    badges = [HighlightBadge(**b) for b in _select_top3_indicators(pulse_result)]
+
+    today = Config.get_today_str()
+    return BriefingHeroData(
+        date=str(record["date"]),
+        created_at=int(record.get("created_at") or 0),
+        score=score,
+        signal=signal,
+        summary_line=first_line,
+        highlight_badges=badges,
+        is_today=(str(record["date"]) == today),
+    )
 
 
 def get_portfolio(request: Request) -> PortfolioReader:
