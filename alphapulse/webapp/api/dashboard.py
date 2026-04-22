@@ -75,15 +75,69 @@ class ContentWidgetData(BaseModel):
     recent: list[ContentRecentItem]
 
 
+class PortfolioPosition(BaseModel):
+    code: str
+    name: str
+    quantity: float
+    current_price: float
+
+
+class PortfolioSnapshotData(BaseModel):
+    date: str
+    cash: float
+    total_value: float
+    daily_return: float
+    cumulative_return: float
+    drawdown: float
+    positions: list[PortfolioPosition]
+
+
+class PortfolioHistoryPoint(BaseModel):
+    date: str
+    total_value: float
+
+
+class RiskAlert(BaseModel):
+    level: str
+    message: str
+
+
+class RiskReportBody(BaseModel):
+    drawdown_status: str | None = None
+    var_95: float | None = None
+    cvar_95: float | None = None
+    alerts: list[RiskAlert] = []
+
+
+class RiskReportData(BaseModel):
+    report: RiskReportBody
+    # stress: 스트레스 시나리오별 StressResult dict — 이종 구조라 dict 로 유지
+    stress: dict = {}
+    cached: bool = False
+    computed_at: float | None = None
+
+
+class TableStatusData(BaseModel):
+    name: str
+    row_count: int
+    latest_date: str | None
+    distinct_codes: int
+
+
+class DataStatusData(BaseModel):
+    tables: list[TableStatusData]
+    gaps_count: int
+
+
 class HomeResponse(BaseModel):
     briefing: BriefingHeroData | None
     pulse: PulseWidgetData | None
     feedback: FeedbackWidgetData | None
     content: ContentWidgetData
-    portfolio: dict | None
-    portfolio_history: list
-    risk: dict | None
-    data_status: dict
+    portfolio: PortfolioSnapshotData | None
+    portfolio_history: list[PortfolioHistoryPoint]
+    risk: RiskReportData | None
+    data_status: DataStatusData
 
 
 def _select_top3_indicators(pulse_result: dict) -> list[dict]:
@@ -281,12 +335,12 @@ async def home(
         except Exception as e:
             logger.warning("home: risk fetch failed: %s", e)
 
-    data_status_data: dict = {"tables": [], "gaps_count": 0}
+    data_status_data = DataStatusData(tables=[], gaps_count=0)
     try:
-        data_status_data = {
-            "tables": [t.__dict__ for t in data.get_status()],
-            "gaps_count": len(data.detect_gaps(days=5)),
-        }
+        data_status_data = DataStatusData(
+            tables=[TableStatusData(**t.__dict__) for t in data.get_status()],
+            gaps_count=len(data.detect_gaps(days=5)),
+        )
     except Exception as e:
         logger.warning("home: data_status fetch failed: %s", e)
 
@@ -295,8 +349,13 @@ async def home(
         pulse=pulse,
         feedback=feedback,
         content=content,
-        portfolio=portfolio_snap.__dict__ if portfolio_snap else None,
-        portfolio_history=[s.__dict__ for s in portfolio_hist],
-        risk=risk_data,
+        portfolio=(
+            PortfolioSnapshotData(**portfolio_snap.__dict__) if portfolio_snap else None
+        ),
+        portfolio_history=[
+            PortfolioHistoryPoint(date=s.date, total_value=s.total_value)
+            for s in portfolio_hist
+        ],
+        risk=RiskReportData(**risk_data) if risk_data else None,
         data_status=data_status_data,
     )
