@@ -221,7 +221,8 @@ class TestBuildBriefingHero:
         assert result.is_today is True
         assert result.date == "20260422"
         assert result.score == 62.5
-        assert result.signal == "positive"
+        # signal 은 항상 score 기반 enum key 로 재계산됨 (라벨 역변환)
+        assert result.signal == "strong_bullish"
         assert result.summary_line == "코스피 강세 흐름."
         assert result.created_at == 1766839200
         assert len(result.highlight_badges) == 1

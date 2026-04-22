@@ -10,6 +10,10 @@ from alphapulse import __version__
 # requests/urllib3 버전 불일치 경고 억제
 warnings.filterwarnings("ignore", message="urllib3.*chardet.*charset_normalizer")
 
+# pykrx 로그인 실패 경고는 데이터 수집 시 반복 출력되어 소음이 큼 — ERROR 이상만
+# 노출하고 나머지는 무시 (실제 데이터는 FinanceDataReader 등 보조 소스로 대체 가능).
+logging.getLogger("pykrx").setLevel(logging.ERROR)
+
 
 @click.group()
 @click.version_option(version=__version__, prog_name="ap")

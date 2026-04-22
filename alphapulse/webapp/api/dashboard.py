@@ -75,15 +75,87 @@ class ContentWidgetData(BaseModel):
     recent: list[ContentRecentItem]
 
 
+class PortfolioPosition(BaseModel):
+    code: str
+    name: str
+    quantity: float
+    current_price: float
+
+
+class PortfolioSnapshotData(BaseModel):
+    date: str
+    cash: float
+    total_value: float
+    daily_return: float
+    cumulative_return: float
+    drawdown: float
+    positions: list[PortfolioPosition]
+
+
+class PortfolioHistoryPoint(BaseModel):
+    date: str
+    total_value: float
+
+
+class RiskAlert(BaseModel):
+    level: str
+    message: str
+
+
+class RiskReportBody(BaseModel):
+    drawdown_status: str | None = None
+    var_95: float | None = None
+    cvar_95: float | None = None
+    alerts: list[RiskAlert] = []
+
+
+class RiskReportData(BaseModel):
+    report: RiskReportBody
+    # stress: 스트레스 시나리오별 StressResult dict — 이종 구조라 dict 로 유지
+    stress: dict = {}
+    cached: bool = False
+    computed_at: float | None = None
+
+
+class TableStatusData(BaseModel):
+    name: str
+    row_count: int
+    latest_date: str | None
+    distinct_codes: int
+
+
+class DataStatusData(BaseModel):
+    tables: list[TableStatusData]
+    gaps_count: int
+
+
 class HomeResponse(BaseModel):
     briefing: BriefingHeroData | None
     pulse: PulseWidgetData | None
     feedback: FeedbackWidgetData | None
     content: ContentWidgetData
-    portfolio: dict | None
-    portfolio_history: list
-    risk: dict | None
-    data_status: dict
+    portfolio: PortfolioSnapshotData | None
+    portfolio_history: list[PortfolioHistoryPoint]
+    risk: RiskReportData | None
+    data_status: DataStatusData
+
+
+def _score_to_signal_key(score: float) -> str:
+    """score 값 → SignalLevel enum key (FE market-labels 의 scoreToSignal 과 대칭).
+
+    백엔드 DB 에는 Korean 라벨("강한 매수 (Strong Bullish)")로 저장되어 있으나,
+    FE 는 enum key("strong_bullish")로 스타일 매칭한다. API 응답에서는 키로
+    변환해 내린다. 기준: Config.SIGNAL_THRESHOLDS 와 일치.
+    """
+    if score >= 60:
+        return "strong_bullish"
+    if score >= 20:
+        return "moderately_bullish"
+    if score >= -19:
+        return "neutral"
+    if score >= -59:
+        return "moderately_bearish"
+    return "strong_bearish"
 
 
 def _select_top3_indicators(pulse_result: dict) -> list[dict]:
@@ -125,7 +197,8 @@ def _build_briefing_hero(store: BriefingStore) -> BriefingHeroData | None:
     pulse_result = payload.get("pulse_result") or {}
 
     score = float(pulse_result.get("score", 0.0))
-    signal = str(pulse_result.get("signal", "neutral"))
+    # DB 에 저장된 signal 은 Korean 라벨 → 항상 score 기반 enum key 로 재계산
+    signal = _score_to_signal_key(score)
 
     daily = payload.get("daily_result_msg") or ""
     first_line = daily.split("\n", 1)[0].strip() if daily else ""
@@ -153,17 +226,18 @@ def _build_pulse_widget(history: PulseHistory) -> PulseWidgetData:
     records = history.get_recent(days=7)
     if not records:
         return PulseWidgetData(latest=None, history7=[])
+    latest_score = float(records[0]["score"])
     latest = PulseLatest(
         date=str(records[0]["date"]),
-        score=float(records[0]["score"]),
-        signal=str(records[0]["signal"]),
+        score=latest_score,
+        signal=_score_to_signal_key(latest_score),
     )
     chronological = list(reversed(records))
     history7 = [
         PulseHistoryPoint(
             date=str(r["date"]),
             score=float(r["score"]),
-            signal=str(r["signal"]),
+            signal=_score_to_signal_key(float(r["score"])),
         )
         for r in chronological
     ]
@@ -281,12 +355,12 @@ async def home(
         except Exception as e:
             logger.warning("home: risk fetch failed: %s", e)
 
-    data_status_data: dict = {"tables": [], "gaps_count": 0}
+    data_status_data = DataStatusData(tables=[], gaps_count=0)
     try:
-        data_status_data = {
-            "tables": [t.__dict__ for t in data.get_status()],
-            "gaps_count": len(data.detect_gaps(days=5)),
-        }
+        data_status_data = DataStatusData(
+            tables=[TableStatusData(**t.__dict__) for t in data.get_status()],
+            gaps_count=len(data.detect_gaps(days=5)),
+        )
     except Exception as e:
         logger.warning("home: data_status fetch failed: %s", e)
 
@@ -295,8 +369,13 @@ async def home(
         pulse=pulse,
         feedback=feedback,
         content=content,
-        portfolio=portfolio_snap.__dict__ if portfolio_snap else None,
-        portfolio_history=[s.__dict__ for s in portfolio_hist],
-        risk=risk_data,
+        portfolio=(
+            PortfolioSnapshotData(**portfolio_snap.__dict__) if portfolio_snap else None
+        ),
+        portfolio_history=[
+            PortfolioHistoryPoint(date=s.date, total_value=s.total_value)
+            for s in portfolio_hist
+        ],
+        risk=RiskReportData(**risk_data) if risk_data else None,
         data_status=data_status_data,
     )

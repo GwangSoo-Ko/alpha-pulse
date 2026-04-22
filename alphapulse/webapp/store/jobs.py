@@ -149,3 +149,103 @@ class JobRepository:
                 (kind,),
             ).fetchone()
         return _row_to_job(row) if row else None
+
+    def create_or_return_running_by_kind_and_date(
+        self,
+        *,
+        kind: JobKind,
+        date: str,
+        job_id: str,
+        params: dict,
+        user_id: int,
+        tenant_id: int | None = None,
+    ) -> tuple[Job, bool]:
+        """원자적 find-or-create. 동일 kind+date 의 running Job 이 있으면 재사용,
+        없으면 새로 생성.
+
+        BEGIN IMMEDIATE 로 단일 트랜잭션에서 체크→삽입을 수행해 TOCTOU race 를
+        제거한다. 반환: (Job, created) — created=True 면 새로 만든 것.
+        """
+        now = time.time()
+        with sqlite3.connect(self.db_path, isolation_level=None) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE kind = ? "
+                    "AND status IN ('pending', 'running') "
+                    "AND json_extract(params, '$.date') = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (kind, date),
+                ).fetchone()
+                if row is not None:
+                    conn.execute("COMMIT")
+                    return _row_to_job(row), False
+                conn.execute(
+                    "INSERT INTO jobs (id, kind, status, progress, "
+                    "progress_text, params, user_id, tenant_id, "
+                    "created_at, updated_at) "
+                    "VALUES (?, ?, 'pending', 0.0, '', ?, ?, ?, ?, ?)",
+                    (
+                        job_id, kind,
+                        json.dumps(params, ensure_ascii=False),
+                        user_id, tenant_id, now, now,
+                    ),
+                )
+                fresh = conn.execute(
+                    "SELECT * FROM jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                conn.execute("COMMIT")
+                return _row_to_job(fresh), True
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+    def create_or_return_running_by_kind(
+        self,
+        *,
+        kind: JobKind,
+        job_id: str,
+        params: dict,
+        user_id: int,
+        tenant_id: int | None = None,
+    ) -> tuple[Job, bool]:
+        """원자적 find-or-create. 동일 kind 의 running Job 이 있으면 재사용,
+        없으면 새로 생성 (date 조건 없음).
+
+        BEGIN IMMEDIATE 로 단일 트랜잭션에서 체크→삽입을 수행해 TOCTOU race 를
+        제거한다. 반환: (Job, created).
+        """
+        now = time.time()
+        with sqlite3.connect(self.db_path, isolation_level=None) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT * FROM jobs WHERE kind = ? "
+                    "AND status IN ('pending', 'running') "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (kind,),
+                ).fetchone()
+                if row is not None:
+                    conn.execute("COMMIT")
+                    return _row_to_job(row), False
+                conn.execute(
+                    "INSERT INTO jobs (id, kind, status, progress, "
+                    "progress_text, params, user_id, tenant_id, "
+                    "created_at, updated_at) "
+                    "VALUES (?, ?, 'pending', 0.0, '', ?, ?, ?, ?, ?)",
+                    (
+                        job_id, kind,
+                        json.dumps(params, ensure_ascii=False),
+                        user_id, tenant_id, now, now,
+                    ),
+                )
+                fresh = conn.execute(
+                    "SELECT * FROM jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                conn.execute("COMMIT")
+                return _row_to_job(fresh), True
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise

@@ -24,7 +24,7 @@ class FeedbackEvaluator:
 
     def get_hit_rates(self, days: int = 30) -> dict:
         """기간별 적중률 계산."""
-        records = self.store.get_recent(days=days)
+        records = self.store.get_recent(limit=days)
         evaluated = [r for r in records if r["hit_1d"] is not None]
 
         if not evaluated:
@@ -49,7 +49,7 @@ class FeedbackEvaluator:
 
     def get_indicator_accuracy(self, days: int = 30, threshold: float = 50.0) -> dict:
         """지표별 극단값 적중률. 각 지표가 ±threshold 이상일 때 시장 방향 적중률."""
-        records = self.store.get_recent(days=days)
+        records = self.store.get_recent(limit=days)
         evaluated = [r for r in records if r["hit_1d"] is not None and r["indicator_scores"]]
 
         result: dict[str, dict[str, Any]] = {}
@@ -82,7 +82,7 @@ class FeedbackEvaluator:
 
     def get_correlation(self, days: int = 30) -> float | None:
         """시그널 강도 vs 1일 수익률 Pearson 상관계수."""
-        records = self.store.get_recent(days=days)
+        records = self.store.get_recent(limit=days)
         pairs = [
             (r["score"], r["return_1d"])
             for r in records

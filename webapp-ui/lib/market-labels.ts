@@ -64,6 +64,33 @@ export function scoreToSignal(score: number): SignalLevel {
   return "strong_bearish"
 }
 
+// 백엔드 Config.get_signal_label() 이 반환하는 한글 라벨 → SignalLevel 키 역방향 매핑.
+// 기존 저장소(pulse_history, briefings)는 label 을 그대로 저장해 두었고,
+// 새로 시리얼라이즈되는 Phase 3 응답은 key 를 직접 내려주길 권장.
+const SIGNAL_LABEL_PREFIX_MAP: Array<[string, SignalLevel]> = [
+  ["강한 매수", "strong_bullish"],
+  ["매수 우위", "moderately_bullish"],
+  ["중립", "neutral"],
+  ["매도 우위", "moderately_bearish"],
+  ["강한 매도", "strong_bearish"],
+]
+
+export function normalizeSignalKey(signal: string): SignalLevel {
+  // 1) 이미 enum 키면 그대로
+  if (signal in SIGNAL_STYLE) return signal as SignalLevel
+  // 2) "강한 매수 (Strong Bullish)" 류 한글 라벨 prefix 매치
+  for (const [prefix, key] of SIGNAL_LABEL_PREFIX_MAP) {
+    if (signal.startsWith(prefix)) return key
+  }
+  // 3) 영어 소문자 포함 매치 (legacy / 혼합 입력)
+  const lower = signal.toLowerCase()
+  if (lower.includes("strong_bullish") || lower.includes("strong bullish")) return "strong_bullish"
+  if (lower.includes("moderately_bullish") || lower.includes("moderately bullish")) return "moderately_bullish"
+  if (lower.includes("moderately_bearish") || lower.includes("moderately bearish")) return "moderately_bearish"
+  if (lower.includes("strong_bearish") || lower.includes("strong bearish")) return "strong_bearish"
+  return "neutral"
+}
+
 export function signalStyle(signal: string) {
-  return SIGNAL_STYLE[signal as SignalLevel] ?? SIGNAL_STYLE.neutral
+  return SIGNAL_STYLE[normalizeSignalKey(signal)]
 }

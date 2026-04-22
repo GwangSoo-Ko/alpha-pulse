@@ -58,7 +58,7 @@ def test_update_analysis(store):
 def test_get_recent(store):
     for i in range(5):
         store.save_signal(f"2026040{i+1}", float(i * 10), "매수", {})
-    recent = store.get_recent(days=3)
+    recent = store.get_recent(limit=3)
     assert len(recent) == 3
     assert recent[0]["date"] == "20260405"  # most recent first
 
