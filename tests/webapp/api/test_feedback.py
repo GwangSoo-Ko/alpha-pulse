@@ -266,3 +266,48 @@ def test_detail_requires_auth(app):
     c = TestClient(app, base_url="https://testserver")
     r = c.get("/api/v1/feedback/20260421")
     assert r.status_code == 401
+
+
+# _decode_text_field branch tests — verify helper handles JSON-encoded values
+# from FeedbackStore.update_analysis (which json.dumps() post_analysis/blind_spots)
+
+
+def test_decode_text_field_json_encoded_string():
+    """update_analysis 가 문자열을 json.dumps 하면 앞뒤에 따옴표 붙음."""
+    from alphapulse.webapp.api.feedback import _decode_text_field
+    assert _decode_text_field('"hello"') == "hello"
+
+
+def test_decode_text_field_json_encoded_list():
+    """list 는 comma-join 된 문자열로 반환."""
+    from alphapulse.webapp.api.feedback import _decode_text_field
+    assert _decode_text_field('["a","b","c"]') == "a, b, c"
+
+
+def test_decode_text_field_json_encoded_empty_list():
+    """빈 list 는 None 반환."""
+    from alphapulse.webapp.api.feedback import _decode_text_field
+    assert _decode_text_field('[]') is None
+
+
+def test_decode_text_field_json_encoded_dict_returned_as_raw():
+    """dict 는 frontend 가 처리할 수 있도록 원본 JSON 문자열로."""
+    from alphapulse.webapp.api.feedback import _decode_text_field
+    raw = '{"section":"analysis","body":"text"}'
+    result = _decode_text_field(raw)
+    # 원본 그대로 또는 재직렬화 — 둘 다 허용
+    assert result is not None
+    assert "section" in result
+
+
+def test_decode_text_field_invalid_json_returns_raw():
+    """깨진 JSON 은 원본 문자열 그대로."""
+    from alphapulse.webapp.api.feedback import _decode_text_field
+    assert _decode_text_field("not json") == "not json"
+
+
+def test_decode_text_field_none_and_empty():
+    """None 과 빈 문자열 모두 None 반환."""
+    from alphapulse.webapp.api.feedback import _decode_text_field
+    assert _decode_text_field(None) is None
+    assert _decode_text_field("") is None

@@ -179,11 +179,11 @@ def _indicator_accuracy_list(raw: dict) -> list[IndicatorAccuracy]:
     items = [
         IndicatorAccuracy(
             key=k,
-            accuracy=v.get("accuracy") or 0.0,
-            count=v.get("total") or 0,
+            accuracy=v.get("accuracy", 0.0),
+            count=v.get("total", 0),
         )
         for k, v in raw.items()
-        if (v.get("total") or 0) > 0
+        if v.get("total", 0) > 0
     ]
     items.sort(key=lambda x: x.accuracy, reverse=True)
     return items
