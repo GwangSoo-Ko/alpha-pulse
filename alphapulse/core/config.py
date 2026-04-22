@@ -21,6 +21,7 @@ class Config:
         self.DATA_DIR = self.BASE_DIR / "data"
         self.CACHE_DB = self.DATA_DIR / "cache.db"
         self.HISTORY_DB = self.DATA_DIR / "history.db"
+        self.BRIEFINGS_DB = self.DATA_DIR / "briefings.db"
 
         # .env 파일 로드 (프로젝트 루트)
         load_dotenv(self.BASE_DIR / ".env")

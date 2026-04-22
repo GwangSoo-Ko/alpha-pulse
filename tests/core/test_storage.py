@@ -214,3 +214,24 @@ class TestPulseHistory:
         result = history.get("20260313")
         assert result is not None
         assert result["details"] == details
+
+    def test_save_sanitizes_numpy_like_types(
+        self, history: PulseHistory
+    ) -> None:
+        """numpy int64/float64 등 __float__ 지원 타입은 자동 float 으로 직렬화된다.
+
+        SignalEngine.run() 이 details 에 numpy 스칼라를 남길 수 있어
+        기존에 TypeError: Object of type int64 is not JSON serializable 발생.
+        """
+        class FakeNpInt:
+            def __float__(self) -> float:
+                return 42.0
+
+        details = {"investor_flow": {"score": FakeNpInt(), "details": "raw"}}
+        # 예외 없이 저장되고, 조회 시 float 로 변환되어야 함
+        history.save("20260313", 10.0, "neutral", details)
+
+        result = history.get("20260313")
+        assert result is not None
+        assert result["details"]["investor_flow"]["score"] == 42.0
+        assert result["details"]["investor_flow"]["details"] == "raw"

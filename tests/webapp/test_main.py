@@ -158,3 +158,21 @@ def test_content_reader_on_state(env: Path):
     app = create_app(backtest_db_path=env / "backtest.db")
     assert hasattr(app.state, "content_reader")
     assert app.state.content_reader is not None
+
+
+def test_briefing_router_registered():
+    """create_app 후 briefing 엔드포인트가 라우트에 등록된다."""
+    from alphapulse.webapp.main import create_app
+    app = create_app()
+    routes = {r.path for r in app.routes}
+    assert "/api/v1/briefings" in routes
+    assert "/api/v1/briefings/{date}" in routes
+    assert "/api/v1/briefings/latest" in routes
+    assert "/api/v1/briefings/run" in routes
+
+
+def test_briefing_store_on_state():
+    from alphapulse.webapp.main import create_app
+    app = create_app()
+    assert hasattr(app.state, "briefing_store")
+    assert app.state.briefing_store is not None

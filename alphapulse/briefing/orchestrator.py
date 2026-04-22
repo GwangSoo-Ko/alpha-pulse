@@ -6,7 +6,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from alphapulse.core.config import Config
+from alphapulse.core.notifier import TelegramNotifier
 from alphapulse.core.storage import DataCache, PulseHistory
+from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.market.engine.signal_engine import SignalEngine
 
 logger = logging.getLogger(__name__)
@@ -173,7 +175,6 @@ class BriefingOrchestrator:
 
         # [5] Send via Telegram (async, 단일 이벤트 루프 내)
         if send_telegram:
-            from alphapulse.core.notifier import TelegramNotifier
             notifier = TelegramNotifier()
             await notifier._send_message(quant_msg)
             await notifier._send_message(synth_msg)
@@ -199,7 +200,8 @@ class BriefingOrchestrator:
             except Exception as e:
                 logger.warning(f"시그널 피드백 기록 실패: {e}")
 
-        return {
+        # [8] Briefing payload 영속화 — 실패해도 메인 흐름 중단 금지
+        payload = {
             "pulse_result": pulse_result,
             "content_summaries": content_summaries,
             "commentary": commentary,
@@ -212,6 +214,14 @@ class BriefingOrchestrator:
             "post_analysis": post_analysis,
             "generated_at": datetime.now().isoformat(),
         }
+        try:
+            store = BriefingStore(self.config.BRIEFINGS_DB)
+            await asyncio.to_thread(store.save, pulse_result["date"], payload)
+            logger.info(f"Briefing 저장 완료: {pulse_result['date']}")
+        except Exception as e:
+            logger.warning(f"Briefing 저장 실패: {e}")
+
+        return payload
 
     def run(self, date: str | None = None, send_telegram: bool = True) -> dict:
         """Sync wrapper — CLI에서 호출."""

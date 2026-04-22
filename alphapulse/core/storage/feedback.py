@@ -71,7 +71,11 @@ class FeedbackStore:
             signal: 시황 시그널 라벨.
             indicator_scores: 지표별 점수 딕셔너리.
         """
-        indicator_scores_json = json.dumps(indicator_scores, ensure_ascii=False)
+        indicator_scores_json = json.dumps(
+            indicator_scores,
+            ensure_ascii=False,
+            default=lambda o: float(o) if hasattr(o, "__float__") else str(o),
+        )
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
@@ -171,8 +175,16 @@ class FeedbackStore:
             news_summary: 뉴스 요약 문자열.
             blind_spots: 발견된 블라인드 스팟 리스트.
         """
-        post_analysis_json = json.dumps(post_analysis, ensure_ascii=False)
-        blind_spots_json = json.dumps(blind_spots, ensure_ascii=False)
+        post_analysis_json = json.dumps(
+            post_analysis,
+            ensure_ascii=False,
+            default=lambda o: float(o) if hasattr(o, "__float__") else str(o),
+        )
+        blind_spots_json = json.dumps(
+            blind_spots,
+            ensure_ascii=False,
+            default=lambda o: float(o) if hasattr(o, "__float__") else str(o),
+        )
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
                 """

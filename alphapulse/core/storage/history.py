@@ -51,7 +51,11 @@ class PulseHistory:
             signal: 시황 시그널 라벨.
             details: 세부 항목별 점수 딕셔너리.
         """
-        details_json = json.dumps(details, ensure_ascii=False)
+        details_json = json.dumps(
+            details,
+            ensure_ascii=False,
+            default=lambda o: float(o) if hasattr(o, "__float__") else str(o),
+        )
         now = time.time()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
