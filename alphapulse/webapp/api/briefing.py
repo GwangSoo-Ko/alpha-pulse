@@ -43,7 +43,7 @@ class BriefingDetail(BaseModel):
     synthesis: str | None
     quant_msg: str
     synth_msg: str
-    feedback_context: dict | None
+    feedback_context: dict | str | None
     daily_result_msg: str
     news: dict
     post_analysis: dict | None

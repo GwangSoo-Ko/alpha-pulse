@@ -11,7 +11,7 @@ export type BriefingDetail = {
   synthesis: string | null
   quant_msg: string
   synth_msg: string
-  feedback_context: Record<string, unknown> | null
+  feedback_context: Record<string, unknown> | string | null
   daily_result_msg: string
   news: { articles: Array<Record<string, unknown>> }
   post_analysis: Record<string, unknown> | null
