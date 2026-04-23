@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+import time
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -185,6 +186,43 @@ class ContentReader:
         except sqlite3.OperationalError as e:
             logger.warning("content_search: FTS5 init failed — %s", e)
             self._fts_available = False
+
+    def upsert_index(self, filename: str) -> None:
+        """단일 파일을 FTS5 인덱스에 반영 (upsert)."""
+        if not self._fts_available or self.fts_db is None:
+            return
+        path = self.reports_dir / filename
+        if not path.is_file():
+            return
+        meta = _meta_from_file(path)
+        body = _read_body(path)
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        with sqlite3.connect(self.fts_db) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "DELETE FROM reports_fts WHERE filename = ?", (filename,)
+                )
+                conn.execute(
+                    "DELETE FROM reports_meta WHERE filename = ?", (filename,)
+                )
+                conn.execute(
+                    "INSERT INTO reports_fts (filename, title, category, body) "
+                    "VALUES (?, ?, ?, ?)",
+                    (filename, meta["title"], meta["category"], body),
+                )
+                conn.execute(
+                    "INSERT INTO reports_meta (filename, mtime, indexed_at) "
+                    "VALUES (?, ?, ?)",
+                    (filename, mtime, time.time()),
+                )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     def _scan(self) -> list[ReportMeta]:
         if not self.reports_dir.is_dir():

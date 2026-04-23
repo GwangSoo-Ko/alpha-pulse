@@ -1,11 +1,12 @@
 """ContentReader FTS5 검색 인덱스 테스트."""
 
 import sqlite3
+import time
 
-from alphapulse.webapp.store.readers.content import ContentReader
 from alphapulse.webapp.store.readers.content import (
-    _sanitize_fts_query,
+    ContentReader,
     _read_body,
+    _sanitize_fts_query,
 )
 
 
@@ -77,3 +78,53 @@ class TestReadBody:
 
     def test_missing_file_returns_empty(self, tmp_path):
         assert _read_body(tmp_path / "missing.md") == ""
+
+
+def _write_report(dir_path, name, title="제목", category="테스트", body="본문 내용"):
+    (dir_path / name).write_text(
+        f'---\ntitle: "{title}"\ncategory: "{category}"\npublished: "2026-04-01"\nanalyzed_at: "2026-04-02T10:00"\n---\n\n{body}\n',
+        encoding="utf-8",
+    )
+
+
+class TestUpsertIndex:
+    def test_upsert_inserts_new_row(self, tmp_path):
+        _write_report(tmp_path, "a.md", title="삼성전자", body="반도체 호황")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.upsert_index("a.md")
+        with sqlite3.connect(reader.fts_db) as conn:
+            conn.row_factory = sqlite3.Row
+            meta_rows = conn.execute("SELECT * FROM reports_meta").fetchall()
+            assert len(meta_rows) == 1
+            assert meta_rows[0]["filename"] == "a.md"
+            fts_rows = conn.execute(
+                "SELECT filename, title, body FROM reports_fts"
+            ).fetchall()
+            assert len(fts_rows) == 1
+            assert fts_rows[0]["title"] == "삼성전자"
+            assert "반도체 호황" in fts_rows[0]["body"]
+
+    def test_upsert_replaces_existing_row(self, tmp_path):
+        _write_report(tmp_path, "a.md", title="원본")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.upsert_index("a.md")
+        _write_report(tmp_path, "a.md", title="수정됨", body="새 본문")
+        time.sleep(0.01)
+        reader.upsert_index("a.md")
+        with sqlite3.connect(reader.fts_db) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM reports_meta").fetchall()
+            assert len(rows) == 1
+            fts = conn.execute("SELECT title, body FROM reports_fts").fetchall()
+            assert fts[0]["title"] == "수정됨"
+            assert "새 본문" in fts[0]["body"]
+
+    def test_upsert_noop_when_file_missing(self, tmp_path):
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.upsert_index("ghost.md")
+        with sqlite3.connect(reader.fts_db) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM reports_meta").fetchone()[0] == 0
+
+    def test_upsert_noop_when_fts_unavailable(self, tmp_path):
+        reader = ContentReader(reports_dir=tmp_path)  # fts_db_path 없음
+        reader.upsert_index("whatever.md")  # 예외 없이 조용히 반환
