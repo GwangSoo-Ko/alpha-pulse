@@ -288,13 +288,14 @@ async def get_analytics(
     user: User = Depends(get_current_user),
     evaluator: FeedbackEvaluator = Depends(get_feedback_evaluator),
 ):
-    """4개 시각화 데이터셋 번들."""
+    """4개 시각화 데이터셋 번들 (one-pass)."""
+    bundle = evaluator.get_all_analytics(days=days)
     return AnalyticsResponse(
         days=days,
-        hit_rate_trend=[HitRateTrendPoint(**p) for p in evaluator.get_hit_rate_trend(days=days)],
-        score_return_points=[ScoreReturnPoint(**p) for p in evaluator.get_score_return_points(days=days)],
-        indicator_heatmap=[IndicatorHeatmapCell(**c) for c in evaluator.get_indicator_heatmap(days=days)],
-        signal_breakdown=[SignalBreakdownRow(**r) for r in evaluator.get_signal_breakdown(days=days)],
+        hit_rate_trend=[HitRateTrendPoint(**p) for p in bundle["hit_rate_trend"]],
+        score_return_points=[ScoreReturnPoint(**p) for p in bundle["score_return_points"]],
+        indicator_heatmap=[IndicatorHeatmapCell(**c) for c in bundle["indicator_heatmap"]],
+        signal_breakdown=[SignalBreakdownRow(**r) for r in bundle["signal_breakdown"]],
     )
 
 
