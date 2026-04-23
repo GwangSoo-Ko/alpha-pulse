@@ -6,6 +6,7 @@ Read-only. 실제 리포트 쓰기는 `alphapulse.content.reporter.ReportWriter`
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -64,6 +65,38 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     except yaml.YAMLError as e:
         logger.warning("YAML 파싱 실패: %s", e)
         return {}, body
+
+
+def _sanitize_fts_query(raw):
+    """사용자 입력을 FTS5 MATCH 로 안전하게 변환.
+
+    특수문자 `"`, `*`, `:`, `(`, `)` 를 공백으로 치환 후 phrase 로 감싼다.
+    빈 문자열이면 "" 반환.
+    """
+    cleaned = re.sub(r'["*:()\[\]]', ' ', raw or "").strip()
+    if not cleaned:
+        return ""
+    return f'"{cleaned}"'
+
+
+def _read_body(path):
+    """`.md` 파일에서 frontmatter(`---...---`) 를 제거한 본문 반환.
+
+    파일 없으면 빈 문자열. frontmatter 없으면 전체 텍스트.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ""
+    if not text.startswith("---"):
+        return text
+    # `---` 이후 다음 `\n---` 위치 탐색
+    rest = text[3:]
+    close_idx = rest.find("\n---")
+    if close_idx < 0:
+        return text
+    after = rest[close_idx + len("\n---"):]
+    return after.lstrip("\r\n")
 
 
 def _meta_from_file(path: Path) -> ReportMeta:
