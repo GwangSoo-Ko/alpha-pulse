@@ -71,4 +71,27 @@ test.describe("Feedback", () => {
     await page.getByRole("tab", { name: "이력" }).click()
     await expect(page.getByRole("table")).toBeVisible()
   })
+
+  test("이력 탭 컬럼 클릭 시 sort URL 반영", async ({ page }) => {
+    await page.goto("/feedback")
+    const empty = page.getByText("평가된 시그널이 없습니다")
+    const isEmpty = await empty.isVisible().catch(() => false)
+    test.skip(isEmpty, "DB 비어있음")
+    await page.getByRole("tab", { name: "이력" }).click()
+    await page.getByRole("columnheader", { name: /점수/ }).click()
+    await expect(page).toHaveURL(/sort=score/)
+  })
+
+  test("이력 탭 내보내기 버튼 클릭 시 다운로드", async ({ page }) => {
+    await page.goto("/feedback")
+    const empty = page.getByText("평가된 시그널이 없습니다")
+    const isEmpty = await empty.isVisible().catch(() => false)
+    test.skip(isEmpty, "DB 비어있음")
+    await page.getByRole("tab", { name: "이력" }).click()
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByRole("link", { name: /내보내기/ }).click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(/feedback_history_.*\.csv/)
+  })
 })
