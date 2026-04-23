@@ -183,3 +183,92 @@ class TestBuildIndex:
         reader = ContentReader(reports_dir=tmp_path)
         stats = reader.build_index()
         assert stats == {"added": 0, "updated": 0, "removed": 0}
+
+
+class TestSearch:
+    def _setup(self, tmp_path, files):
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        for f in files:
+            _write_report(tmp_path, f["name"], title=f["title"],
+                          category=f.get("category", "테스트"),
+                          body=f.get("body", ""))
+        reader.build_index()
+        return reader
+
+    def test_search_matches_title(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "삼성전자 분석", "body": "반도체 업황"},
+            {"name": "b.md", "title": "애플 실적", "body": "아이폰 판매량"},
+        ])
+        result = reader.search(q="삼성전자", categories=None, date_from=None, date_to=None, page=1, size=20)
+        filenames = [i["filename"] for i in result["items"]]
+        assert "a.md" in filenames and "b.md" not in filenames
+
+    def test_search_matches_body(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "제목1", "body": "반도체 호황 지속"},
+            {"name": "b.md", "title": "제목2", "body": "자동차 수출 확대"},
+        ])
+        result = reader.search(q="반도체", categories=None, date_from=None, date_to=None, page=1, size=20)
+        assert [i["filename"] for i in result["items"]] == ["a.md"]
+
+    def test_search_trigram_matches_korean_with_particles(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "뉴스", "body": "삼성전자가 실적을 발표했다"},
+        ])
+        result = reader.search(q="삼성전자", categories=None, date_from=None, date_to=None, page=1, size=20)
+        assert len(result["items"]) == 1
+
+    def test_search_returns_highlight_with_mark_tags(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "분석", "body": "반도체 시장 전망"},
+        ])
+        result = reader.search(q="반도체", categories=None, date_from=None, date_to=None, page=1, size=20)
+        hl = result["items"][0]["highlight"]
+        assert "<mark>" in hl and "</mark>" in hl
+
+    def test_search_sanitizes_special_chars(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "AI 테마", "body": "분석"},
+        ])
+        result = reader.search(q='"AI"*', categories=None, date_from=None, date_to=None, page=1, size=20)
+        assert len(result["items"]) == 1
+
+    def test_search_empty_q_returns_empty_items(self, tmp_path):
+        reader = self._setup(tmp_path, [{"name": "a.md", "title": "제목"}])
+        result = reader.search(q="", categories=None, date_from=None, date_to=None, page=1, size=20)
+        assert result["items"] == [] and result["total"] == 0
+
+    def test_search_filters_by_category_after_fts(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "삼성전자", "category": "기업", "body": ""},
+            {"name": "b.md", "title": "삼성전자", "category": "시장", "body": ""},
+        ])
+        result = reader.search(q="삼성전자", categories=["기업"], date_from=None, date_to=None, page=1, size=20)
+        assert [i["filename"] for i in result["items"]] == ["a.md"]
+
+    def test_search_sorts_by_bm25_rank(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "일반", "body": "반도체 얘기 약간"},
+            {"name": "b.md", "title": "반도체 주도주", "body": "짧음"},
+        ])
+        result = reader.search(q="반도체", categories=None, date_from=None, date_to=None, page=1, size=20)
+        assert result["items"][0]["filename"] == "b.md"
+
+    def test_search_paginates(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": f"f{i}.md", "title": "반도체", "body": f"본문{i}"} for i in range(5)
+        ])
+        page1 = reader.search(q="반도체", categories=None, date_from=None, date_to=None, page=1, size=2)
+        page2 = reader.search(q="반도체", categories=None, date_from=None, date_to=None, page=2, size=2)
+        page3 = reader.search(q="반도체", categories=None, date_from=None, date_to=None, page=3, size=2)
+        assert len(page1["items"]) == 2 and len(page2["items"]) == 2 and len(page3["items"]) == 1
+        assert page1["total"] == 5
+
+    def test_search_returns_all_categories(self, tmp_path):
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "a", "category": "기업"},
+            {"name": "b.md", "title": "b", "category": "시장"},
+        ])
+        result = reader.search(q="a", categories=None, date_from=None, date_to=None, page=1, size=20)
+        assert set(result["categories"]) == {"기업", "시장"}

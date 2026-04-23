@@ -365,5 +365,78 @@ class ContentReader:
             "body": body,
         }
 
+    def search(
+        self,
+        *,
+        q,
+        categories,
+        date_from,
+        date_to,
+        page,
+        size,
+    ) -> dict:
+        """FTS5 기반 검색 + 메타 필터 + rank 정렬 + 페이지네이션."""
+        all_metas = self._scan()
+        categories_all = sorted({m["category"] for m in all_metas})
+        q_sanitized = _sanitize_fts_query(q)
+        if not q_sanitized or not self._fts_available or self.fts_db is None:
+            return {
+                "items": [], "total": 0, "page": page, "size": size,
+                "categories": categories_all,
+            }
+
+        cleaned_q = re.sub(r'["*:()\[\]]', ' ', q or "").strip()
+        try:
+            with sqlite3.connect(self.fts_db) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """
+                    SELECT
+                        filename,
+                        snippet(reports_fts, 3, '<mark>', '</mark>', '…', 16) AS highlight,
+                        bm25(reports_fts) AS rank
+                    FROM reports_fts
+                    WHERE reports_fts MATCH ?
+                    ORDER BY rank
+                    """,
+                    (q_sanitized,),
+                ).fetchall()
+                # FTS5 trigram requires ≥3 chars; fall back to LIKE for short queries
+                if not rows and cleaned_q:
+                    like_pat = f"%{cleaned_q}%"
+                    rows = conn.execute(
+                        """
+                        SELECT
+                            filename,
+                            title AS highlight,
+                            0.0 AS rank
+                        FROM reports_fts
+                        WHERE title LIKE ? OR body LIKE ?
+                        """,
+                        (like_pat, like_pat),
+                    ).fetchall()
+        except sqlite3.OperationalError as e:
+            logger.warning("content_search MATCH failed for %r: %s", q, e)
+            rows = []
+
+        match_by_name = {r["filename"]: dict(r) for r in rows}
+        filtered = [
+            m for m in all_metas
+            if m["filename"] in match_by_name
+            and (not categories or m["category"] in categories)
+            and _date_in_range(m["published"], date_from, date_to)
+        ]
+        filtered.sort(key=lambda m: match_by_name[m["filename"]]["rank"])
+        total = len(filtered)
+        start = (page - 1) * size
+        items = [
+            {**m, "highlight": match_by_name[m["filename"]]["highlight"]}
+            for m in filtered[start:start + size]
+        ]
+        return {
+            "items": items, "total": total, "page": page, "size": size,
+            "categories": categories_all,
+        }
+
     def distinct_categories(self) -> list[str]:
         return sorted({m["category"] for m in self._scan()})
