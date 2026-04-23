@@ -311,3 +311,31 @@ def test_decode_text_field_none_and_empty():
     from alphapulse.webapp.api.feedback import _decode_text_field
     assert _decode_text_field(None) is None
     assert _decode_text_field("") is None
+
+
+def test_analytics_returns_all_four_fields(client, feedback_store):
+    # 간단 시드: 평가된 1건
+    feedback_store.save_signal("20260401", 40.0, "매수 우위", {"investor_flow": 80})
+    feedback_store.update_result("20260401", 2650, 1.0, 870, 0.5, 1.5, 1)
+    r = client.get("/api/v1/feedback/analytics?days=30")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["days"] == 30
+    assert "hit_rate_trend" in body
+    assert "score_return_points" in body
+    assert "indicator_heatmap" in body
+    assert "signal_breakdown" in body
+
+
+def test_analytics_days_param_validated(client):
+    r = client.get("/api/v1/feedback/analytics?days=0")
+    assert r.status_code == 422
+    r = client.get("/api/v1/feedback/analytics?days=400")
+    assert r.status_code == 422
+
+
+def test_analytics_requires_auth(app):
+    from fastapi.testclient import TestClient
+    unauthed = TestClient(app, base_url="https://testserver")
+    r = unauthed.get("/api/v1/feedback/analytics?days=30")
+    assert r.status_code == 401
