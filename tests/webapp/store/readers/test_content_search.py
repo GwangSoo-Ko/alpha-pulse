@@ -128,3 +128,58 @@ class TestUpsertIndex:
     def test_upsert_noop_when_fts_unavailable(self, tmp_path):
         reader = ContentReader(reports_dir=tmp_path)  # fts_db_path 없음
         reader.upsert_index("whatever.md")  # 예외 없이 조용히 반환
+
+
+class TestBuildIndex:
+    def test_build_indexes_all_files_on_empty_db(self, tmp_path):
+        _write_report(tmp_path, "a.md")
+        _write_report(tmp_path, "b.md")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        stats = reader.build_index()
+        assert stats == {"added": 2, "updated": 0, "removed": 0}
+        with sqlite3.connect(reader.fts_db) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM reports_meta").fetchone()[0]
+            assert count == 2
+
+    def test_build_noop_when_all_up_to_date(self, tmp_path):
+        _write_report(tmp_path, "a.md")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.build_index()
+        stats = reader.build_index()
+        assert stats == {"added": 0, "updated": 0, "removed": 0}
+
+    def test_build_detects_mtime_change(self, tmp_path):
+        _write_report(tmp_path, "a.md", title="원본")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.build_index()
+        time.sleep(0.01)
+        _write_report(tmp_path, "a.md", title="수정됨")
+        stats = reader.build_index()
+        assert stats["updated"] == 1
+        with sqlite3.connect(reader.fts_db) as conn:
+            title = conn.execute(
+                "SELECT title FROM reports_fts WHERE filename='a.md'"
+            ).fetchone()[0]
+            assert title == "수정됨"
+
+    def test_build_removes_deleted_files(self, tmp_path):
+        _write_report(tmp_path, "a.md")
+        _write_report(tmp_path, "b.md")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.build_index()
+        (tmp_path / "b.md").unlink()
+        stats = reader.build_index()
+        assert stats["removed"] == 1
+        with sqlite3.connect(reader.fts_db) as conn:
+            names = {r[0] for r in conn.execute("SELECT filename FROM reports_meta").fetchall()}
+            assert names == {"a.md"}
+
+    def test_build_noop_when_dir_missing(self, tmp_path):
+        reader = ContentReader(reports_dir=tmp_path / "missing", fts_db_path=tmp_path / "s.db")
+        stats = reader.build_index()
+        assert stats == {"added": 0, "updated": 0, "removed": 0}
+
+    def test_build_noop_when_fts_unavailable(self, tmp_path):
+        reader = ContentReader(reports_dir=tmp_path)
+        stats = reader.build_index()
+        assert stats == {"added": 0, "updated": 0, "removed": 0}

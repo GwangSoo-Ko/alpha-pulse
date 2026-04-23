@@ -224,6 +224,56 @@ class ContentReader:
                 conn.execute("ROLLBACK")
                 raise
 
+    def build_index(self) -> dict:
+        """디스크와 FTS5 인덱스를 mtime 기반으로 동기화.
+
+        Returns: {"added": N, "updated": N, "removed": N}
+        """
+        if not self._fts_available or self.fts_db is None:
+            return {"added": 0, "updated": 0, "removed": 0}
+        if not self.reports_dir.is_dir():
+            return {"added": 0, "updated": 0, "removed": 0}
+
+        disk: dict[str, float] = {}
+        for entry in self.reports_dir.iterdir():
+            if not entry.is_file():
+                continue
+            if entry.suffix != ".md" or entry.name.startswith("."):
+                continue
+            try:
+                disk[entry.name] = entry.stat().st_mtime
+            except OSError:
+                continue
+
+        with sqlite3.connect(self.fts_db) as conn:
+            rows = conn.execute(
+                "SELECT filename, mtime FROM reports_meta"
+            ).fetchall()
+        db = {r[0]: r[1] for r in rows}
+
+        added = [n for n in disk if n not in db]
+        updated = [n for n in disk if n in db and db[n] != disk[n]]
+        removed = [n for n in db if n not in disk]
+
+        for name in added + updated:
+            try:
+                self.upsert_index(name)
+            except Exception as e:
+                logger.warning("build_index upsert failed for %s: %s", name, e)
+
+        if removed:
+            with sqlite3.connect(self.fts_db) as conn:
+                conn.executemany(
+                    "DELETE FROM reports_fts WHERE filename = ?",
+                    [(n,) for n in removed],
+                )
+                conn.executemany(
+                    "DELETE FROM reports_meta WHERE filename = ?",
+                    [(n,) for n in removed],
+                )
+
+        return {"added": len(added), "updated": len(updated), "removed": len(removed)}
+
     def _scan(self) -> list[ReportMeta]:
         if not self.reports_dir.is_dir():
             # 디렉터리 없음 → 캐시 무효화 + 빈 반환
