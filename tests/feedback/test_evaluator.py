@@ -100,3 +100,32 @@ def test_get_hit_rate_trend_returns_null_when_window_has_no_evaluated(evaluator,
     result = evaluator.get_hit_rate_trend(days=30)
     assert len(result) == 5
     assert all(p["rolling_hit_rate_1d"] is None for p in result)
+
+
+def test_get_score_return_points_empty_returns_empty_list(evaluator):
+    assert evaluator.get_score_return_points(days=30) == []
+
+
+def test_get_score_return_points_filters_null_return_1d(evaluator, store):
+    # 2건 평가, 1건 미평가
+    store.save_signal("20260401", 40.0, "매수 우위", {})
+    store.update_result("20260401", 2650, 1.0, 870, 0.5, 1.5, 1)
+    store.save_signal("20260402", -30.0, "매도 우위", {})
+    store.update_result("20260402", 2640, -0.4, 870, 0.1, -0.8, 1)
+    store.save_signal("20260403", 20.0, "매수 우위", {})  # not evaluated
+    result = evaluator.get_score_return_points(days=30)
+    assert len(result) == 2
+    dates = {p["date"] for p in result}
+    assert dates == {"20260401", "20260402"}
+
+
+def test_get_score_return_points_returns_all_four_fields(evaluator, store):
+    store.save_signal("20260401", 40.0, "매수 우위", {})
+    store.update_result("20260401", 2650, 1.0, 870, 0.5, 1.5, 1)
+    result = evaluator.get_score_return_points(days=30)
+    assert len(result) == 1
+    p = result[0]
+    assert p["date"] == "20260401"
+    assert p["score"] == 40.0
+    assert p["return_1d"] == 1.5
+    assert p["signal"] == "매수 우위"

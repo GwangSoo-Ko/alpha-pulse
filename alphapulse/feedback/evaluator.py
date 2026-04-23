@@ -99,6 +99,23 @@ class FeedbackEvaluator:
         corr = float(corr_matrix[0, 1])
         return round(corr, 3) if not np.isnan(corr) else None
 
+    def get_score_return_points(self, days: int = 30) -> list[dict]:
+        """return_1d 평가된 레코드만 score-return 점으로 변환.
+
+        Returns: [{date, score, return_1d, signal}]
+        """
+        records = self.store.get_recent(limit=days)
+        return [
+            {
+                "date": r["date"],
+                "score": float(r["score"]),
+                "return_1d": float(r["return_1d"]),
+                "signal": r["signal"],
+            }
+            for r in records
+            if r["return_1d"] is not None
+        ]
+
     def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
         """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
 
