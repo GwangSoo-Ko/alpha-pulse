@@ -1,7 +1,9 @@
 "use client"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { ExportButton } from "@/components/ui/export-button"
+import { SortableTh } from "@/components/ui/sortable-th"
 import { signalStyle } from "@/lib/market-labels"
 
 export type SignalHistoryItem = {
@@ -23,6 +25,8 @@ type ListData = {
   size: number
   total: number
 }
+
+type SortKey = "date" | "score" | "return_1d" | "hit_1d"
 
 function formatDate(yyyymmdd: string): string {
   return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6)}`
@@ -52,27 +56,78 @@ function pageHref(sp: URLSearchParams, page: number): string {
 }
 
 export function SignalHistoryTable({ data }: { data: ListData }) {
+  const router = useRouter()
   const sp = useSearchParams()
   const spParams = new URLSearchParams(sp?.toString() ?? "")
   const totalPages = Math.max(1, Math.ceil(data.total / data.size))
   const sign = (v: number) => (v >= 0 ? "+" : "")
 
+  const currentSort = (sp?.get("sort") ?? "date") as SortKey
+  const currentDir = (sp?.get("dir") ?? "desc") as "asc" | "desc"
+
+  function onSort(key: SortKey) {
+    const next = new URLSearchParams(sp?.toString() ?? "")
+    if (currentSort === key) {
+      next.set("dir", currentDir === "asc" ? "desc" : "asc")
+    } else {
+      next.set("sort", key)
+      next.set("dir", "desc")
+    }
+    next.delete("page")
+    router.push(`/feedback?${next}`)
+  }
+
+  const exportQs = new URLSearchParams(sp?.toString() ?? "")
+  exportQs.delete("page")
+  const exportHref = `/api/v1/feedback/history/export?${exportQs}`
+
   return (
     <div className="space-y-3">
-      <p className="text-sm text-neutral-400">
-        전체 {data.total}건 · 페이지 {data.page}/{totalPages}
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-neutral-400">
+          전체 {data.total}건 · 페이지 {data.page}/{totalPages}
+        </p>
+        <ExportButton href={exportHref} />
+      </div>
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="text-left text-xs text-neutral-400">
-            <th className="px-3 py-2">날짜</th>
+            <SortableTh
+              label="날짜"
+              sortKey="date"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-3 py-2"
+            />
             <th className="px-3 py-2">시그널</th>
-            <th className="px-3 py-2">점수</th>
+            <SortableTh
+              label="점수"
+              sortKey="score"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-3 py-2"
+            />
             <th className="px-3 py-2">KOSPI</th>
-            <th className="px-3 py-2">1D</th>
+            <SortableTh
+              label="1D"
+              sortKey="return_1d"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-3 py-2"
+            />
             <th className="px-3 py-2">3D</th>
             <th className="px-3 py-2">5D</th>
-            <th className="px-3 py-2">적중 1/3/5</th>
+            <SortableTh
+              label="적중 1/3/5"
+              sortKey="hit_1d"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-3 py-2"
+            />
           </tr>
         </thead>
         <tbody>

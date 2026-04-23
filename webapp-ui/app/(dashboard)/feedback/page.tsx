@@ -33,7 +33,7 @@ import {
 export const dynamic = "force-dynamic"
 
 type Props = {
-  searchParams: Promise<{ days?: string; page?: string }>
+  searchParams: Promise<{ days?: string; page?: string; sort?: string; dir?: string }>
 }
 
 type SummaryResponse = {
@@ -63,6 +63,8 @@ export default async function FeedbackPage({ searchParams }: Props) {
   const sp = await searchParams
   const days = Math.min(365, Math.max(1, Number(sp.days || 30)))
   const page = Math.max(1, Number(sp.page || 1))
+  const sort = sp.sort ?? "date"
+  const dir = sp.dir ?? "desc"
 
   const cookieStore = await cookies()
   const h = {
@@ -75,7 +77,7 @@ export default async function FeedbackPage({ searchParams }: Props) {
       { headers: h, cache: "no-store" },
     ),
     apiFetch<HistoryResponse>(
-      `/api/v1/feedback/history?days=${days}&page=${page}&size=20`,
+      `/api/v1/feedback/history?days=${days}&page=${page}&size=20&sort=${sort}&dir=${dir}`,
       { headers: h, cache: "no-store" },
     ),
     apiFetch<AnalyticsResponse>(
