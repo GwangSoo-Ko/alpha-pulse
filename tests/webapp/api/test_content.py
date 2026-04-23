@@ -340,3 +340,36 @@ def test_list_reports_without_q_highlight_is_none(client_fts, app_fts, reports_d
     body = r.json()
     for item in body["items"]:
         assert item.get("highlight") is None
+
+
+def test_reports_sort_by_title_asc(client_fts, reports_dir):
+    (reports_dir / "a.md").write_text(
+        '---\ntitle: "감"\ncategory: "c"\npublished: "2026-04-01"\nanalyzed_at: "2026-04-02T10:00"\nsource: ""\n---\n\n본문\n',
+        encoding="utf-8",
+    )
+    (reports_dir / "b.md").write_text(
+        '---\ntitle: "배"\ncategory: "c"\npublished: "2026-04-02"\nanalyzed_at: "2026-04-03T10:00"\nsource: ""\n---\n\n본문\n',
+        encoding="utf-8",
+    )
+    r = client_fts.get("/api/v1/content/reports?sort=title&dir=asc")
+    assert r.status_code == 200
+    titles = [item["title"] for item in r.json()["items"]]
+    assert titles == ["감", "배"]
+
+
+def test_reports_export_returns_csv_with_bom(client_fts, reports_dir):
+    (reports_dir / "export_a.md").write_text(
+        '---\ntitle: "테스트 리포트"\ncategory: "시장"\npublished: "2026-04-01"\nanalyzed_at: "2026-04-02T10:00"\nsource: ""\n---\n\n본문\n',
+        encoding="utf-8",
+    )
+    r = client_fts.get("/api/v1/content/reports/export")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    body = r.content.decode("utf-8")
+    assert body.startswith("\ufeff")
+    lines = body.lstrip("\ufeff").strip().split("\r\n")
+    # 헤더 확인
+    assert lines[0].startswith("제목,카테고리,발행일,분석일")
+    # 데이터 행 확인
+    assert len(lines) >= 2
+    assert "테스트 리포트" in lines[1]
