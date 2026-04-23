@@ -10,7 +10,7 @@ import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import TypedDict
 
 import yaml
 
@@ -346,7 +346,8 @@ class ContentReader:
         date_from: str | None = None,
         date_to: str | None = None,
         query: str | None = None,
-        sort: Literal["newest", "oldest"] = "newest",
+        sort: str = "newest",
+        dir: str = "desc",
         page: int = 1,
         size: int = 20,
     ) -> ListResult:
@@ -358,6 +359,17 @@ class ContentReader:
                 page=page, size=size,
             )
 
+        # Sort 화이트리스트 + 레거시 값 호환
+        ALLOWED = {"analyzed_at", "published", "title", "category", "newest", "oldest"}
+        sort_col = sort if sort in ALLOWED else "newest"
+        # 레거시 값 매핑
+        if sort_col == "newest":
+            sort_col, reverse = "analyzed_at", True
+        elif sort_col == "oldest":
+            sort_col, reverse = "analyzed_at", False
+        else:
+            reverse = dir.lower() == "desc"
+
         all_metas = self._scan()
         # 필터
         filtered = [
@@ -366,9 +378,8 @@ class ContentReader:
             and _date_in_range(m["published"], date_from, date_to)
             and (not query or query.lower() in m["title"].lower())
         ]
-        # 정렬 (analyzed_at 기준)
-        reverse = sort == "newest"
-        filtered.sort(key=lambda m: m["analyzed_at"], reverse=reverse)
+        # 정렬
+        filtered.sort(key=lambda m: m.get(sort_col, ""), reverse=reverse)
         # 페이지네이션
         total = len(filtered)
         start = (page - 1) * size

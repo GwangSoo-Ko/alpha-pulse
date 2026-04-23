@@ -320,3 +320,53 @@ class TestListReportsIntegration:
         filenames = [i["filename"] for i in result["items"]]
         assert "a.md" in filenames
         assert "b.md" not in filenames
+
+
+class TestListReportsSort:
+    def test_list_reports_sort_by_title_asc(self, tmp_path):
+        _write_report(tmp_path, "a.md", title="감")
+        _write_report(tmp_path, "b.md", title="배")
+        _write_report(tmp_path, "c.md", title="딸기")
+        reader = ContentReader(reports_dir=tmp_path)
+        result = reader.list_reports(sort="title", dir="asc")
+        titles = [i["title"] for i in result["items"]]
+        assert titles == ["감", "딸기", "배"]
+
+    def test_list_reports_sort_by_published_desc(self, tmp_path):
+        import time as _time
+        (tmp_path / "a.md").write_text(
+            '---\ntitle: "first"\ncategory: "c"\npublished: "2026-04-01"\nanalyzed_at: "2026-04-02T10:00"\n---\n\n본문\n',
+            encoding="utf-8",
+        )
+        _time.sleep(0.01)
+        (tmp_path / "b.md").write_text(
+            '---\ntitle: "second"\ncategory: "c"\npublished: "2026-04-15"\nanalyzed_at: "2026-04-16T10:00"\n---\n\n본문\n',
+            encoding="utf-8",
+        )
+        reader = ContentReader(reports_dir=tmp_path)
+        result = reader.list_reports(sort="published", dir="desc")
+        titles = [i["title"] for i in result["items"]]
+        assert titles == ["second", "first"]
+
+    def test_list_reports_sort_newest_legacy_still_works(self, tmp_path):
+        """레거시 값 'newest' 는 analyzed_at DESC 와 동일하게 동작."""
+        _write_report(tmp_path, "a.md")
+        _write_report(tmp_path, "b.md")
+        reader = ContentReader(reports_dir=tmp_path)
+        result = reader.list_reports(sort="newest")
+        assert len(result["items"]) == 2
+
+    def test_list_reports_sort_oldest_legacy(self, tmp_path):
+        _write_report(tmp_path, "a.md")
+        _write_report(tmp_path, "b.md")
+        reader = ContentReader(reports_dir=tmp_path)
+        result = reader.list_reports(sort="oldest")
+        # analyzed_at ASC 정렬
+        assert len(result["items"]) == 2
+
+    def test_list_reports_sort_invalid_falls_back(self, tmp_path):
+        _write_report(tmp_path, "a.md")
+        reader = ContentReader(reports_dir=tmp_path)
+        result = reader.list_reports(sort="DROP TABLE", dir="desc")
+        # fallback — 에러 없이 응답
+        assert len(result["items"]) == 1
