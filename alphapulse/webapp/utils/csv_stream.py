@@ -4,24 +4,11 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 
 from fastapi.responses import StreamingResponse
-
-
-class _SyncStreamingResponse(StreamingResponse):
-    """body_iterator 를 sync iterator 로 유지하는 StreamingResponse.
-
-    Starlette 0.x 는 sync iterable 을 iterate_in_threadpool 으로 async 래핑하는데,
-    테스트에서 동기 순회(for chunk in r.body_iterator)가 필요하므로 직접 할당.
-    """
-
-    def __init__(self, content: Iterator[str], **kwargs: Any) -> None:
-        super().__init__(content=content, **kwargs)
-        # Starlette 가 async 로 래핑한 것을 원래 sync iterator 로 되돌림
-        self.body_iterator = content  # type: ignore[assignment]
 
 
 def stream_csv_response(
@@ -31,20 +18,10 @@ def stream_csv_response(
     filename: str,
     chunk_size: int = 1000,
 ) -> StreamingResponse:
-    """dict iterable 을 CSV 로 스트리밍 (UTF-8 BOM 포함).
+    """dict iterable 을 CSV 로 스트리밍 (UTF-8 BOM 포함)."""
 
-    Args:
-        rows: dict iterable. 각 dict 는 columns 의 key 에 해당하는 값 보유.
-        columns: [(header_label, dict_key), ...]. 순서대로 컬럼.
-        filename: Content-Disposition 에 포함될 파일명.
-        chunk_size: 몇 행마다 yield 할지 (메모리 제어).
-
-    Returns:
-        StreamingResponse with UTF-8 BOM + header + body.
-    """
-
-    def _iter_csv() -> Iterator[str]:
-        yield "\ufeff"  # Excel 한글 호환 BOM
+    def _iter_csv():
+        yield "\ufeff"
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([label for label, _ in columns])
@@ -62,7 +39,7 @@ def stream_csv_response(
         if buf.getvalue():
             yield buf.getvalue()
 
-    return _SyncStreamingResponse(
+    return StreamingResponse(
         _iter_csv(),
         media_type="text/csv; charset=utf-8",
         headers={
