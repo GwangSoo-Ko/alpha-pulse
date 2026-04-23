@@ -74,20 +74,55 @@ class BriefingStore:
             "created_at": row["created_at"],
         }
 
-    def get_recent(self, days: int = 30) -> list[dict]:
-        """날짜 DESC 정렬, 최대 days 건."""
+    def get_recent(self, days: int = 30, offset: int = 0) -> list[dict]:
+        """날짜 DESC 정렬, 최대 days 건. offset 으로 페이지네이션."""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT date, payload, created_at FROM briefings "
-                "ORDER BY date DESC LIMIT ?",
-                (days,),
+                "ORDER BY date DESC LIMIT ? OFFSET ?",
+                (days, offset),
             ).fetchall()
         return [
             {
                 "date": r["date"],
                 "payload": json.loads(r["payload"]),
                 "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
+
+    def list_summaries(self, limit: int, offset: int = 0) -> list[dict]:
+        """payload 의 요약 필드만 json_extract 로 추출 (경량 목록용).
+
+        Returns:
+            [{date, created_at, score, signal, has_synthesis, has_commentary}]
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT
+                    date,
+                    created_at,
+                    json_extract(payload, '$.pulse_result.score') AS score,
+                    json_extract(payload, '$.pulse_result.signal') AS signal,
+                    (json_extract(payload, '$.synthesis') IS NOT NULL) AS has_synthesis,
+                    (json_extract(payload, '$.commentary') IS NOT NULL) AS has_commentary
+                FROM briefings
+                ORDER BY date DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+        return [
+            {
+                "date": r["date"],
+                "created_at": r["created_at"],
+                "score": float(r["score"]) if r["score"] is not None else 0.0,
+                "signal": str(r["signal"]) if r["signal"] is not None else "",
+                "has_synthesis": bool(r["has_synthesis"]),
+                "has_commentary": bool(r["has_commentary"]),
             }
             for r in rows
         ]
