@@ -288,3 +288,35 @@ class TestSearch:
         # highlight 는 <mark> 포함되어야 함 (FTS 경로와 동등)
         hl = next(i["highlight"] for i in result["items"] if i["filename"] == "a.md")
         assert "<mark>" in hl and "</mark>" in hl
+
+
+class TestListReportsIntegration:
+    def test_list_reports_with_query_uses_fts(self, tmp_path):
+        """query 있으면 search() 로 위임 — 본문 매칭 + highlight."""
+        _write_report(tmp_path, "a.md", title="비관련", body="반도체 호황")
+        _write_report(tmp_path, "b.md", title="그냥", body="다른 내용")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.build_index()
+        result = reader.list_reports(query="반도체")
+        filenames = [i["filename"] for i in result["items"]]
+        assert filenames == ["a.md"]
+        assert result["items"][0].get("highlight") is not None
+
+    def test_list_reports_without_query_no_highlight(self, tmp_path):
+        """query 없으면 기존 경로 — highlight 필드 없음."""
+        _write_report(tmp_path, "a.md", title="제목")
+        reader = ContentReader(reports_dir=tmp_path, fts_db_path=tmp_path / "s.db")
+        reader.build_index()
+        result = reader.list_reports()
+        for item in result["items"]:
+            assert item.get("highlight") is None or "highlight" not in item
+
+    def test_list_reports_without_fts_db_falls_back_to_substring(self, tmp_path):
+        """fts_db_path 없으면 기존 substring 경로 (제목 부분 매칭)."""
+        _write_report(tmp_path, "a.md", title="삼성전자 분석")
+        _write_report(tmp_path, "b.md", title="다른 뉴스")
+        reader = ContentReader(reports_dir=tmp_path)  # FTS 불가
+        result = reader.list_reports(query="삼성")
+        filenames = [i["filename"] for i in result["items"]]
+        assert "a.md" in filenames
+        assert "b.md" not in filenames

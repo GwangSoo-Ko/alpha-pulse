@@ -340,6 +340,14 @@ class ContentReader:
         page: int = 1,
         size: int = 20,
     ) -> ListResult:
+        # FTS 가능 + query 있으면 search() 로 위임
+        if query and self._fts_available:
+            return self.search(
+                q=query, categories=categories,
+                date_from=date_from, date_to=date_to,
+                page=page, size=size,
+            )
+
         all_metas = self._scan()
         # 필터
         filtered = [
