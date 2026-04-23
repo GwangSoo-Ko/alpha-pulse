@@ -34,4 +34,18 @@ test.describe("Briefing Compare", () => {
       page.getByText("두 날짜 모두 브리핑이 없습니다"),
     ).toBeVisible()
   })
+
+  test("체크박스 2개 선택 → 비교 버튼 활성화 → 비교 페이지 이동", async ({ page }) => {
+    await page.goto("/briefings")
+    const checkboxes = page.locator('input[type="checkbox"]')
+    const count = await checkboxes.count()
+    test.skip(count < 2, "브리핑 2개 미만 — 비교 스모크 스킵")
+    await checkboxes.nth(0).check()
+    await checkboxes.nth(1).check()
+    const btn = page.getByRole("button", { name: /비교하기/ })
+    await expect(btn).toBeEnabled()
+    await btn.click()
+    await expect(page).toHaveURL(/\/briefings\/compare\?a=\d{8}&b=\d{8}/)
+    await expect(page.getByRole("heading", { name: "브리핑 비교" })).toBeVisible()
+  })
 })

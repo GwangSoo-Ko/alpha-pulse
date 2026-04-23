@@ -6,7 +6,7 @@ export function BriefingsCompareButton({ selected }: { selected: string[] }) {
   if (selected.length !== 2) {
     return (
       <Button size="sm" variant="outline" disabled>
-        비교하기 {selected.length > 0 && `(${selected.length}/2)`}
+        비교하기
       </Button>
     )
   }

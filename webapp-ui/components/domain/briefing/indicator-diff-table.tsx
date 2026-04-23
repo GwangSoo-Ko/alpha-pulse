@@ -73,7 +73,7 @@ function ScoreCell({ v }: { v: number | null }) {
 
 function DeltaCell({ v }: { v: number | null }) {
   if (v === null) return <span className="text-neutral-600">—</span>
-  if (v === 0) return <span className="text-neutral-400 font-mono">0.0 ·</span>
+  if (v === 0) return <span className="text-neutral-400 font-mono tabular-nums">0.0</span>
   const cls = v > 0 ? "text-emerald-400" : "text-rose-400"
   const arrow = v > 0 ? "↑" : "↓"
   return (

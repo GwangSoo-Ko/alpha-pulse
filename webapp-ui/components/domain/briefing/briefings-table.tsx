@@ -55,7 +55,9 @@ export function BriefingsTable({ data }: { data: ListData }) {
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="text-left text-xs text-neutral-400">
-            <th scope="col" className="px-3 py-2 w-8"></th>
+            <th scope="col" className="px-3 py-2 w-8">
+              <span className="sr-only">선택</span>
+            </th>
             <th scope="col" className="px-3 py-2">날짜</th>
             <th scope="col" className="px-3 py-2">점수</th>
             <th scope="col" className="px-3 py-2">시그널</th>
