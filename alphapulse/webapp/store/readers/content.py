@@ -6,6 +6,7 @@ Read-only. 실제 리포트 쓰기는 `alphapulse.content.reporter.ReportWriter`
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -105,10 +106,52 @@ def _date_in_range(
 class ContentReader:
     """./reports/*.md 읽기 전용 리더."""
 
-    def __init__(self, reports_dir: Path | str) -> None:
+    def __init__(
+        self,
+        reports_dir: Path | str,
+        fts_db_path: Path | str | None = None,
+    ) -> None:
         self.reports_dir = Path(reports_dir)
+        self.fts_db = Path(fts_db_path) if fts_db_path else None
         self._scan_cache: list[ReportMeta] | None = None
         self._scan_cache_mtime: float | None = None
+        self._fts_available = False
+        if self.fts_db is not None:
+            self._init_fts_schema()
+
+    def _init_fts_schema(self) -> None:
+        """FTS5 가상 테이블 + meta 테이블 생성 (idempotent).
+
+        FTS5 모듈 미지원 SQLite 빌드에서는 조용히 실패하고
+        ``_fts_available = False`` 유지.
+        """
+        try:
+            self.fts_db.parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(self.fts_db) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS reports_meta (
+                        filename TEXT PRIMARY KEY,
+                        mtime REAL NOT NULL,
+                        indexed_at REAL NOT NULL
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS reports_fts USING fts5(
+                        filename UNINDEXED,
+                        title,
+                        category,
+                        body,
+                        tokenize = 'trigram'
+                    )
+                    """
+                )
+            self._fts_available = True
+        except sqlite3.OperationalError as e:
+            logger.warning("content_search: FTS5 init failed — %s", e)
+            self._fts_available = False
 
     def _scan(self) -> list[ReportMeta]:
         if not self.reports_dir.is_dir():

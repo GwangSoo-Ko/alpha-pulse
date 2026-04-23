@@ -23,6 +23,7 @@ class Config:
         self.HISTORY_DB = self.DATA_DIR / "history.db"
         self.BRIEFINGS_DB = self.DATA_DIR / "briefings.db"
         self.FEEDBACK_DB = self.DATA_DIR / "feedback.db"
+        self.CONTENT_SEARCH_DB = self.DATA_DIR / "content_search.db"
 
         # .env 파일 로드 (프로젝트 루트)
         load_dotenv(self.BASE_DIR / ".env")
