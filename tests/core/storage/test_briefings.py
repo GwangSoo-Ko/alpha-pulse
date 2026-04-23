@@ -69,3 +69,53 @@ def test_save_sanitizes_unknown_objects_to_str(store):
     store.save("20260421", payload)
     got = store.get("20260421")
     assert got["payload"]["weird"] == "custom-obj"
+
+
+def test_list_summaries_returns_only_summary_fields(store):
+    payload = {
+        "pulse_result": {"score": 62.5, "signal": "매수 우위"},
+        "commentary": "x",
+        "synthesis": "y",
+        "daily_result_msg": "m",
+        "news": {"articles": []},
+    }
+    store.save(date="20260420", payload=payload)
+    result = store.list_summaries(limit=10)
+    assert len(result) == 1
+    row = result[0]
+    assert row["date"] == "20260420"
+    assert row["score"] == 62.5
+    assert row["signal"] == "매수 우위"
+    assert row["has_synthesis"] is True
+    assert row["has_commentary"] is True
+    assert "created_at" in row
+    # payload 전체가 포함되지 않아야 한다
+    assert "payload" not in row
+    assert "news" not in row
+
+
+def test_list_summaries_paginates_with_offset(store):
+    for i in range(5):
+        store.save(date=f"2026041{i}", payload={"pulse_result": {"score": float(i), "signal": "중립"}})
+    page1 = store.list_summaries(limit=2, offset=0)
+    page2 = store.list_summaries(limit=2, offset=2)
+    page3 = store.list_summaries(limit=2, offset=4)
+    assert [r["date"] for r in page1] == ["20260414", "20260413"]  # DESC
+    assert [r["date"] for r in page2] == ["20260412", "20260411"]
+    assert [r["date"] for r in page3] == ["20260410"]
+
+
+def test_list_summaries_has_synthesis_false_when_missing(store):
+    store.save(date="20260420", payload={"pulse_result": {"score": 0.0, "signal": "중립"}})
+    result = store.list_summaries(limit=10)
+    assert result[0]["has_synthesis"] is False
+    assert result[0]["has_commentary"] is False
+
+
+def test_get_recent_offset(store):
+    for i in range(5):
+        store.save(date=f"2026041{i}", payload={"test": i})
+    first = store.get_recent(days=3, offset=0)
+    second = store.get_recent(days=3, offset=3)
+    assert [r["date"] for r in first] == ["20260414", "20260413", "20260412"]
+    assert [r["date"] for r in second] == ["20260411", "20260410"]

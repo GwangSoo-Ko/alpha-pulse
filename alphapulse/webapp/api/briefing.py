@@ -124,18 +124,30 @@ async def get_latest(
 
 @router.get("", response_model=BriefingListResponse)
 async def list_briefings(
-    days: int = Query(30, ge=1, le=365),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     store: BriefingStore = Depends(get_briefing_store),
 ):
-    rows = store.get_recent(days=days)
-    total = len(rows)
-    start = (page - 1) * size
-    sliced = rows[start:start + size]
+    """브리핑 요약 목록 (json_extract 기반 경량 payload)."""
+    import sqlite3
+
+    offset = (page - 1) * size
+    summaries = store.list_summaries(limit=size, offset=offset)
+    with sqlite3.connect(store.db_path) as conn:
+        total = conn.execute("SELECT COUNT(*) FROM briefings").fetchone()[0]
     return BriefingListResponse(
-        items=[_row_to_summary(r) for r in sliced],
+        items=[
+            BriefingSummary(
+                date=s["date"],
+                score=s["score"],
+                signal=s["signal"],
+                has_synthesis=s["has_synthesis"],
+                has_commentary=s["has_commentary"],
+                created_at=s["created_at"],
+            )
+            for s in summaries
+        ],
         page=page,
         size=size,
         total=total,

@@ -14,7 +14,6 @@ from alphapulse.core.config import Config
 from alphapulse.core.storage import PulseHistory
 from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.core.storage.feedback import FeedbackStore
-from alphapulse.feedback.evaluator import FeedbackEvaluator
 from alphapulse.trading.core.audit import AuditLogger
 from alphapulse.webapp.api.audit import router as audit_router
 from alphapulse.webapp.api.backtest import router as backtest_router
@@ -104,7 +103,6 @@ def create_app(
     content_reader = ContentReader(reports_dir=core.REPORTS_DIR)
     briefing_store = BriefingStore(db_path=core.BRIEFINGS_DB)
     feedback_store = FeedbackStore(db_path=core.FEEDBACK_DB)
-    feedback_evaluator = FeedbackEvaluator(store=feedback_store)
 
     # Settings — conditional on WEBAPP_ENCRYPT_KEY being present
     encrypt_key = os.environ.get("WEBAPP_ENCRYPT_KEY", cfg.encrypt_key)
@@ -171,7 +169,6 @@ def create_app(
     app.state.content_reader = content_reader
     app.state.briefing_store = briefing_store
     app.state.feedback_store = feedback_store
-    app.state.feedback_evaluator = feedback_evaluator
     app.state.settings_repo = settings_repo
     app.state.settings_service = settings_service
 

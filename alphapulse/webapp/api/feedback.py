@@ -120,7 +120,13 @@ def get_feedback_store(request: Request) -> FeedbackStore:
 
 
 def get_feedback_evaluator(request: Request) -> FeedbackEvaluator:
-    return request.app.state.feedback_evaluator
+    """매 요청마다 새 FeedbackEvaluator 인스턴스를 생성한다.
+
+    Evaluator 내부 record 캐시가 인스턴스 생명주기 = 요청 생명주기 내에서만
+    유효하도록 request-scoped 로 구성. 싱글턴 대신 store 만 공유.
+    """
+    store = request.app.state.feedback_store
+    return FeedbackEvaluator(store=store)
 
 
 def _int_to_bool(v: int | None) -> bool | None:
@@ -264,15 +270,35 @@ async def get_history(
     user: User = Depends(get_current_user),
     store: FeedbackStore = Depends(get_feedback_store),
 ):
-    rows = store.get_recent(limit=days)
-    total = len(rows)
-    start = (page - 1) * size
-    sliced = rows[start:start + size]
+    # 총 건수는 days 범위 기준 (기존 동작 유지)
+    total_rows = store.get_recent(limit=days)
+    total = len(total_rows)
+    offset = (page - 1) * size
+    # page 가 days 범위 초과하면 빈 페이지
+    if offset >= days:
+        page_rows = []
+    else:
+        page_rows = store.get_recent(limit=size, offset=offset)
+
     return FeedbackHistoryResponse(
-        items=[_row_to_history_item(r) for r in sliced],
+        items=[
+            SignalHistoryItem(
+                date=r["date"],
+                score=float(r["score"]),
+                signal=r["signal"],
+                kospi_change_pct=r["kospi_change_pct"],
+                return_1d=r["return_1d"],
+                return_3d=r["return_3d"],
+                return_5d=r["return_5d"],
+                hit_1d=_int_to_bool(r["hit_1d"]),
+                hit_3d=_int_to_bool(r["hit_3d"]),
+                hit_5d=_int_to_bool(r["hit_5d"]),
+            )
+            for r in page_rows
+        ],
         page=page,
         size=size,
-        total=total,
+        total=min(total, days),
     )
 
 
@@ -282,13 +308,14 @@ async def get_analytics(
     user: User = Depends(get_current_user),
     evaluator: FeedbackEvaluator = Depends(get_feedback_evaluator),
 ):
-    """4개 시각화 데이터셋 번들."""
+    """4개 시각화 데이터셋 번들 (one-pass)."""
+    bundle = evaluator.get_all_analytics(days=days)
     return AnalyticsResponse(
         days=days,
-        hit_rate_trend=[HitRateTrendPoint(**p) for p in evaluator.get_hit_rate_trend(days=days)],
-        score_return_points=[ScoreReturnPoint(**p) for p in evaluator.get_score_return_points(days=days)],
-        indicator_heatmap=[IndicatorHeatmapCell(**c) for c in evaluator.get_indicator_heatmap(days=days)],
-        signal_breakdown=[SignalBreakdownRow(**r) for r in evaluator.get_signal_breakdown(days=days)],
+        hit_rate_trend=[HitRateTrendPoint(**p) for p in bundle["hit_rate_trend"]],
+        score_return_points=[ScoreReturnPoint(**p) for p in bundle["score_return_points"]],
+        indicator_heatmap=[IndicatorHeatmapCell(**c) for c in bundle["indicator_heatmap"]],
+        signal_breakdown=[SignalBreakdownRow(**r) for r in bundle["signal_breakdown"]],
     )
 
 

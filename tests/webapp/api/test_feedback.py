@@ -30,7 +30,7 @@ def feedback_evaluator(feedback_store):
 
 
 @pytest.fixture
-def app(webapp_db, feedback_store, feedback_evaluator):
+def app(webapp_db, feedback_store):
     cfg = WebAppConfig(
         session_secret="x" * 32,
         monitor_bot_token="", monitor_channel_id="",
@@ -43,7 +43,6 @@ def app(webapp_db, feedback_store, feedback_evaluator):
     app.state.login_attempts = LoginAttemptsRepository(db_path=webapp_db)
     app.state.jobs = JobRepository(db_path=webapp_db)
     app.state.feedback_store = feedback_store
-    app.state.feedback_evaluator = feedback_evaluator
     app.state.audit = MagicMock()
     app.state.users.create(
         email="a@x.com",
@@ -339,3 +338,21 @@ def test_analytics_requires_auth(app):
     unauthed = TestClient(app, base_url="https://testserver")
     r = unauthed.get("/api/v1/feedback/analytics?days=30")
     assert r.status_code == 401
+
+
+def test_analytics_endpoint_single_store_call(client, feedback_store, monkeypatch):
+    feedback_store.save_signal("20260401", 40.0, "매수 우위", {"investor_flow": 80})
+    feedback_store.update_result("20260401", 2650, 1.0, 870, 0.5, 1.5, 1)
+
+    call_count = {"n": 0}
+    original = feedback_store.get_recent
+
+    def counting(*args, **kwargs):
+        call_count["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(feedback_store, "get_recent", counting)
+    r = client.get("/api/v1/feedback/analytics?days=30")
+    assert r.status_code == 200
+    # get_all_analytics 는 단일 get_recent 호출만 수행
+    assert call_count["n"] == 1
