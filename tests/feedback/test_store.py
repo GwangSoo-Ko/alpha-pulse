@@ -119,3 +119,33 @@ def test_get_recent_offset(store):
     assert [r["date"] for r in first] == ["20260405", "20260404"]  # DESC
     assert [r["date"] for r in second] == ["20260403", "20260402"]
     assert [r["date"] for r in third] == ["20260401"]
+
+
+def test_get_recent_sort_by_score_desc(store):
+    store.save_signal("20260401", 10.0, "매수 우위", {})
+    store.save_signal("20260402", 80.0, "매수 우위", {})
+    store.save_signal("20260403", 50.0, "매수 우위", {})
+    rows = store.get_recent(limit=10, offset=0, sort="score", dir="desc")
+    assert [r["score"] for r in rows] == [80.0, 50.0, 10.0]
+
+
+def test_get_recent_sort_by_score_asc(store):
+    store.save_signal("20260401", 10.0, "매수 우위", {})
+    store.save_signal("20260402", 80.0, "매수 우위", {})
+    rows = store.get_recent(limit=10, offset=0, sort="score", dir="asc")
+    assert [r["score"] for r in rows] == [10.0, 80.0]
+
+
+def test_get_recent_sort_invalid_column_falls_back(store):
+    """화이트리스트 밖 컬럼은 기본 (date desc) 으로 fallback — SQL injection 방지."""
+    store.save_signal("20260401", 10.0, "매수 우위", {})
+    store.save_signal("20260402", 80.0, "매수 우위", {})
+    rows = store.get_recent(limit=10, offset=0, sort="hacker; DROP TABLE x;", dir="desc")
+    assert [r["date"] for r in rows] == ["20260402", "20260401"]
+
+
+def test_get_recent_sort_invalid_dir_falls_back(store):
+    store.save_signal("20260401", 10.0, "매수 우위", {})
+    store.save_signal("20260402", 80.0, "매수 우위", {})
+    rows = store.get_recent(limit=10, offset=0, sort="date", dir="garbage")
+    assert [r["date"] for r in rows] == ["20260402", "20260401"]

@@ -250,29 +250,34 @@ class FeedbackStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(sql, params)
 
-    def get_recent(self, limit: int = 30, offset: int = 0) -> list[dict]:
+    def get_recent(
+        self,
+        limit: int = 30,
+        offset: int = 0,
+        sort: str = "date",
+        dir: str = "desc",
+    ) -> list[dict]:
         """최근 N건의 피드백 레코드를 조회한다.
 
         signal_feedback.date 가 PRIMARY KEY 이므로 날짜당 1행. 거래일(신호가
         없는 주말/공휴일 제외)의 최근 `limit` 건을 반환. offset 으로 페이지네이션.
 
         Args:
-            limit: 조회할 최대 행 수. 기본값 30.
-            offset: 건너뛸 행 수. 기본값 0.
-
-        Returns:
-            피드백 딕셔너리 리스트 (날짜 내림차순).
+            limit: 최대 행 수.
+            offset: 페이지네이션 offset.
+            sort: 정렬 컬럼 (화이트리스트 검증). 기본 "date".
+            dir: "asc" or "desc". 기본 "desc".
         """
+        ALLOWED = {"date", "score", "return_1d", "hit_1d"}
+        col = sort if sort in ALLOWED else "date"
+        direction = "ASC" if dir.lower() == "asc" else "DESC"
+        sql = (
+            f"SELECT * FROM signal_feedback "
+            f"ORDER BY {col} {direction} LIMIT ? OFFSET ?"
+        )
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(
-                "SELECT * FROM signal_feedback "
-                "ORDER BY date DESC "
-                "LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
-            rows = cursor.fetchall()
-
+            rows = conn.execute(sql, (limit, offset)).fetchall()
         return [dict(row) for row in rows]
 
     def get_pending_evaluation(self) -> list[dict]:
