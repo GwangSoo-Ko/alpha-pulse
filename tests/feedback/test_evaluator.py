@@ -129,3 +129,32 @@ def test_get_score_return_points_returns_all_four_fields(evaluator, store):
     assert p["score"] == 40.0
     assert p["return_1d"] == 1.5
     assert p["signal"] == "매수 우위"
+
+
+def test_get_indicator_heatmap_empty_returns_empty_list(evaluator):
+    assert evaluator.get_indicator_heatmap(days=30) == []
+
+
+def test_get_indicator_heatmap_skips_none_scores(evaluator, store):
+    store.save_signal("20260401", 40.0, "매수 우위",
+                      {"investor_flow": 80, "vkospi": None, "fund_flow": -30})
+    result = evaluator.get_indicator_heatmap(days=30)
+    indicators = {c["indicator"] for c in result}
+    assert indicators == {"investor_flow", "fund_flow"}
+
+
+def test_get_indicator_heatmap_flat_cells(evaluator, store):
+    store.save_signal("20260401", 40.0, "매수 우위", {"investor_flow": 80})
+    store.save_signal("20260402", -30.0, "매도 우위", {"investor_flow": -60, "vkospi": 50})
+    result = evaluator.get_indicator_heatmap(days=30)
+    assert len(result) == 3  # 1 + 2
+    # 각 cell shape 확인
+    for c in result:
+        assert set(c.keys()) == {"date", "indicator", "score"}
+
+
+def test_get_indicator_heatmap_score_is_float(evaluator, store):
+    store.save_signal("20260401", 40.0, "매수 우위", {"investor_flow": 80})
+    result = evaluator.get_indicator_heatmap(days=30)
+    assert isinstance(result[0]["score"], float)
+    assert result[0]["score"] == 80.0

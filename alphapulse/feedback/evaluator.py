@@ -116,6 +116,40 @@ class FeedbackEvaluator:
             if r["return_1d"] is not None
         ]
 
+    def get_indicator_heatmap(self, days: int = 30) -> list[dict]:
+        """각 (date, indicator) 별 score flat list. None 은 skip.
+
+        indicator_scores 는 JSON 문자열 또는 이미 dict.
+        파싱 실패 시 해당 record 전체 skip (로그 warning).
+
+        Returns: [{date, indicator, score}]
+        """
+        records = self.store.get_recent(limit=days)
+        cells: list[dict] = []
+        for record in records:
+            raw = record["indicator_scores"]
+            try:
+                scores = (
+                    json.loads(raw) if isinstance(raw, str) else raw
+                )
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("indicator_heatmap: skip %s — JSON parse fail", record["date"])
+                continue
+            if not isinstance(scores, dict):
+                continue
+            for key, value in scores.items():
+                if value is None:
+                    continue
+                try:
+                    cells.append({
+                        "date": record["date"],
+                        "indicator": key,
+                        "score": float(value),
+                    })
+                except (TypeError, ValueError):
+                    continue
+        return cells
+
     def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
         """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
 
