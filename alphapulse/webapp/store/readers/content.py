@@ -31,6 +31,10 @@ class ReportFull(ReportMeta):
     body: str
 
 
+class SearchResultItem(ReportMeta):
+    highlight: str
+
+
 class ListResult(TypedDict):
     items: list[ReportMeta]
     total: int
@@ -285,14 +289,20 @@ class ContentReader:
 
         if removed:
             with sqlite3.connect(self.fts_db) as conn:
-                conn.executemany(
-                    "DELETE FROM reports_fts WHERE filename = ?",
-                    [(n,) for n in removed],
-                )
-                conn.executemany(
-                    "DELETE FROM reports_meta WHERE filename = ?",
-                    [(n,) for n in removed],
-                )
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.executemany(
+                        "DELETE FROM reports_fts WHERE filename = ?",
+                        [(n,) for n in removed],
+                    )
+                    conn.executemany(
+                        "DELETE FROM reports_meta WHERE filename = ?",
+                        [(n,) for n in removed],
+                    )
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
 
         return {"added": len(added), "updated": len(updated), "removed": len(removed)}
 
@@ -398,13 +408,13 @@ class ContentReader:
     def search(
         self,
         *,
-        q,
-        categories,
-        date_from,
-        date_to,
-        page,
-        size,
-    ) -> dict:
+        q: str | None,
+        categories: list[str] | None,
+        date_from: str | None,
+        date_to: str | None,
+        page: int,
+        size: int,
+    ) -> ListResult:
         """FTS5 기반 검색 + 메타 필터 + rank 정렬 + 페이지네이션."""
         all_metas = self._scan()
         categories_all = sorted({m["category"] for m in all_metas})
