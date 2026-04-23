@@ -64,3 +64,39 @@ def test_get_correlation_insufficient_data(evaluator, store):
     corr = evaluator.get_correlation(days=30)
     # Too few data points for meaningful correlation
     assert corr is None
+
+
+def test_get_hit_rate_trend_empty_returns_empty_list(evaluator):
+    result = evaluator.get_hit_rate_trend(days=30)
+    assert result == []
+
+
+def test_get_hit_rate_trend_returns_dates_ascending(evaluator, store):
+    _seed_data(store, 10)
+    result = evaluator.get_hit_rate_trend(days=30)
+    dates = [p["date"] for p in result]
+    assert dates == sorted(dates)
+
+
+def test_get_hit_rate_trend_computes_rolling_7d_average(evaluator, store):
+    # 14일 데이터, 앞 7일 hit=1, 뒤 7일 hit=0
+    for i in range(14):
+        date = "20260401" if i == 0 else f"202604{i+1:02d}"
+        store.save_signal(date, 40.0, "매수 우위", {})
+        hit = 1 if i < 7 else 0
+        store.update_result(date, 2650 + i, 1.0, 870, 0.5, 1.0, hit)
+    result = evaluator.get_hit_rate_trend(days=30, window=7)
+    # 7번째 (index 6) 시점: 앞 7개(i=0..6) 모두 hit=1 → 1.0
+    # 14번째 (index 13): 앞 7개(i=7..13) 모두 hit=0 → 0.0
+    assert len(result) == 14
+    assert result[6]["rolling_hit_rate_1d"] == 1.0
+    assert result[13]["rolling_hit_rate_1d"] == 0.0
+
+
+def test_get_hit_rate_trend_returns_null_when_window_has_no_evaluated(evaluator, store):
+    # 평가되지 않은(return_1d=None) 레코드만 존재
+    for i in range(5):
+        store.save_signal(f"202604{i+1:02d}", 40.0, "매수 우위", {})
+    result = evaluator.get_hit_rate_trend(days=30)
+    assert len(result) == 5
+    assert all(p["rolling_hit_rate_1d"] is None for p in result)

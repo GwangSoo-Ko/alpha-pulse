@@ -98,3 +98,27 @@ class FeedbackEvaluator:
         corr_matrix = np.corrcoef(scores, returns)
         corr = float(corr_matrix[0, 1])
         return round(corr, 3) if not np.isnan(corr) else None
+
+    def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
+        """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
+
+        Args:
+            days: 조회 기간 (최대 레코드 수).
+            window: rolling window 일수.
+
+        Returns:
+            [{date, rolling_hit_rate_1d}] — window 내 평가 0건이면 None.
+        """
+        records = self.store.get_recent(limit=days)
+        # DESC → ASC
+        records_asc = list(reversed(records))
+        result: list[dict] = []
+        for i in range(len(records_asc)):
+            window_records = records_asc[max(0, i - window + 1): i + 1]
+            evaluated = [r["hit_1d"] for r in window_records if r["hit_1d"] is not None]
+            avg = round(sum(evaluated) / len(evaluated), 4) if evaluated else None
+            result.append({
+                "date": records_asc[i]["date"],
+                "rolling_hit_rate_1d": avg,
+            })
+        return result
