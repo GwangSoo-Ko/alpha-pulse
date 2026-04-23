@@ -200,8 +200,8 @@ def test_feedback_store_on_state():
     assert app.state.feedback_store is not None
 
 
-def test_feedback_evaluator_on_state():
+def test_feedback_evaluator_not_on_state():
+    """FeedbackEvaluator 는 request-scoped 의존성으로 주입되므로 app.state 에 없어야 한다."""
     from alphapulse.webapp.main import create_app
     app = create_app()
-    assert hasattr(app.state, "feedback_evaluator")
-    assert app.state.feedback_evaluator is not None
+    assert not hasattr(app.state, "feedback_evaluator")

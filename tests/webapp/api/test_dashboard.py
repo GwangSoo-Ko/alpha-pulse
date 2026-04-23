@@ -11,6 +11,7 @@ from alphapulse.webapp.api.dashboard import (
     _build_feedback_widget,
     _build_pulse_widget,
     _select_top3_indicators,
+    get_feedback_evaluator,
 )
 from alphapulse.webapp.api.dashboard import router as dash_router
 from alphapulse.webapp.auth.routes import router as auth_router
@@ -84,7 +85,7 @@ def app(webapp_db):  # noqa: PLR0915
         "total_evaluated": 0,
     }
     feedback_evaluator.get_indicator_accuracy.return_value = {}
-    app.state.feedback_evaluator = feedback_evaluator
+    app.dependency_overrides[get_feedback_evaluator] = lambda: feedback_evaluator
 
     content_reader = MagicMock()
     content_reader.list_reports.return_value = {
@@ -444,7 +445,8 @@ class TestHomeV2:
         assert body["portfolio"] is not None
 
     def test_feedback_failure_isolated(self, client, app):
-        app.state.feedback_evaluator.get_hit_rates.side_effect = RuntimeError("x")
+        mock_evaluator = app.dependency_overrides[get_feedback_evaluator]()
+        mock_evaluator.get_hit_rates.side_effect = RuntimeError("x")
         r = client.get("/api/v1/dashboard/home")
         assert r.status_code == 200
         body = r.json()

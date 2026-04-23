@@ -30,7 +30,7 @@ def feedback_evaluator(feedback_store):
 
 
 @pytest.fixture
-def app(webapp_db, feedback_store, feedback_evaluator):
+def app(webapp_db, feedback_store):
     cfg = WebAppConfig(
         session_secret="x" * 32,
         monitor_bot_token="", monitor_channel_id="",
@@ -43,7 +43,6 @@ def app(webapp_db, feedback_store, feedback_evaluator):
     app.state.login_attempts = LoginAttemptsRepository(db_path=webapp_db)
     app.state.jobs = JobRepository(db_path=webapp_db)
     app.state.feedback_store = feedback_store
-    app.state.feedback_evaluator = feedback_evaluator
     app.state.audit = MagicMock()
     app.state.users.create(
         email="a@x.com",

@@ -120,7 +120,13 @@ def get_feedback_store(request: Request) -> FeedbackStore:
 
 
 def get_feedback_evaluator(request: Request) -> FeedbackEvaluator:
-    return request.app.state.feedback_evaluator
+    """매 요청마다 새 FeedbackEvaluator 인스턴스를 생성한다.
+
+    Evaluator 내부 record 캐시가 인스턴스 생명주기 = 요청 생명주기 내에서만
+    유효하도록 request-scoped 로 구성. 싱글턴 대신 store 만 공유.
+    """
+    store = request.app.state.feedback_store
+    return FeedbackEvaluator(store=store)
 
 
 def _int_to_bool(v: int | None) -> bool | None:
