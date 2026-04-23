@@ -16,6 +16,7 @@ type Props = {
     to?: string
     q?: string
     sort?: string
+    dir?: string
   }>
 }
 
@@ -31,6 +32,7 @@ export default async function ContentPage({ searchParams }: Props) {
   if (sp.to) query.set("to", sp.to)
   if (sp.q) query.set("q", sp.q)
   if (sp.sort) query.set("sort", sp.sort)
+  if (sp.dir) query.set("dir", sp.dir)
 
   const cookieStore = await cookies()
   const h = {
