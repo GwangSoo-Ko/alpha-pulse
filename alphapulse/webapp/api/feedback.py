@@ -11,6 +11,7 @@ from alphapulse.core.storage.feedback import FeedbackStore
 from alphapulse.feedback.evaluator import FeedbackEvaluator
 from alphapulse.webapp.auth.deps import get_current_user
 from alphapulse.webapp.store.users import User
+from alphapulse.webapp.utils.csv_stream import csv_filename, stream_csv_response
 
 router = APIRouter(prefix="/api/v1/feedback", tags=["feedback"])
 
@@ -267,18 +268,20 @@ async def get_history(
     days: int = Query(30, ge=1, le=365),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
+    sort: str = Query("date"),
+    dir: str = Query("desc"),
     user: User = Depends(get_current_user),
     store: FeedbackStore = Depends(get_feedback_store),
 ):
     # 총 건수는 days 범위 기준 (기존 동작 유지)
-    total_rows = store.get_recent(limit=days)
+    total_rows = store.get_recent(limit=days, offset=0, sort=sort, dir=dir)
     total = len(total_rows)
     offset = (page - 1) * size
     # page 가 days 범위 초과하면 빈 페이지
     if offset >= days:
         page_rows = []
     else:
-        page_rows = store.get_recent(limit=size, offset=offset)
+        page_rows = store.get_recent(limit=size, offset=offset, sort=sort, dir=dir)
 
     return FeedbackHistoryResponse(
         items=[
@@ -299,6 +302,40 @@ async def get_history(
         page=page,
         size=size,
         total=min(total, days),
+    )
+
+
+@router.get("/history/export")
+async def export_history(
+    days: int = Query(30, ge=1, le=365),
+    sort: str = Query("date"),
+    dir: str = Query("desc"),
+    user: User = Depends(get_current_user),
+    store: FeedbackStore = Depends(get_feedback_store),
+):
+    rows = store.get_recent(limit=days, offset=0, sort=sort, dir=dir)
+
+    def _format(r):
+        hit = r.get("hit_1d")
+        return {
+            "date": r["date"],
+            "score": r["score"],
+            "signal": r["signal"],
+            "return_1d": r.get("return_1d") if r.get("return_1d") is not None else "",
+            "hit_1d": "O" if hit == 1 else ("X" if hit == 0 else ""),
+        }
+
+    columns = [
+        ("날짜", "date"),
+        ("점수", "score"),
+        ("시그널", "signal"),
+        ("1일 수익률(%)", "return_1d"),
+        ("1일 적중", "hit_1d"),
+    ]
+    return stream_csv_response(
+        (_format(r) for r in rows),
+        columns=columns,
+        filename=csv_filename("feedback", "history"),
     )
 
 
