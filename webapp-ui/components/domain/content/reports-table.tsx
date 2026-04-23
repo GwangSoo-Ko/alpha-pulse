@@ -37,13 +37,14 @@ export function ReportsTable({ data }: { data: ListData }) {
 
   function onSort(key: SortKey) {
     const next = new URLSearchParams(sp?.toString() ?? "")
+    // 레거시 "newest"/"oldest" 는 항상 canonical key 로 정규화
     if (effectiveSort === key) {
       next.set("dir", currentDir === "asc" ? "desc" : "asc")
     } else {
-      next.set("sort", key)
       // 텍스트 컬럼 asc 기본, 날짜는 desc
       next.set("dir", key === "title" || key === "category" ? "asc" : "desc")
     }
+    next.set("sort", key)  // 항상 canonical — "newest"/"oldest" 제거
     next.delete("page")
     router.push(`/content?${next}`)
   }

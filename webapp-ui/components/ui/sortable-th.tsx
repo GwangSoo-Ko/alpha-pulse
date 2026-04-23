@@ -1,5 +1,7 @@
 "use client"
 
+import React from "react"
+
 export function SortableTh<K extends string>({
   label,
   sortKey,
@@ -22,12 +24,21 @@ export function SortableTh<K extends string>({
       : "descending"
     : "none"
   const arrow = active ? (currentDir === "asc" ? " ▲" : " ▼") : ""
+  const handleKey = (e: React.KeyboardEvent<HTMLTableCellElement>) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault()
+      onSort(sortKey)
+    }
+  }
   return (
     <th
       scope="col"
       aria-sort={ariaSort}
-      className={`cursor-pointer select-none ${className ?? ""}`}
+      role="columnheader"
+      tabIndex={0}
+      className={`cursor-pointer select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-emerald-500 ${className ?? ""}`}
       onClick={() => onSort(sortKey)}
+      onKeyDown={handleKey}
     >
       {label}{arrow}
     </th>
