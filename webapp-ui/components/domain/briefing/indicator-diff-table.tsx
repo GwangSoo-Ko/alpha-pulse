@@ -66,7 +66,7 @@ function ScoreCell({ v }: { v: number | null }) {
   const cls = v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-neutral-400"
   return (
     <span className={`font-mono tabular-nums ${cls}`}>
-      {v >= 0 ? "+" : ""}{v.toFixed(1)}
+      {v > 0 ? "+" : ""}{v.toFixed(1)}
     </span>
   )
 }
@@ -117,25 +117,46 @@ export function IndicatorDiffTable({
   const indicator = (key: SortKey) =>
     sortBy === key ? (dir === "asc" ? " ▲" : " ▼") : ""
 
+  const ariaSort = (key: SortKey): "ascending" | "descending" | "none" => {
+    if (sortBy !== key) return "none"
+    return dir === "asc" ? "ascending" : "descending"
+  }
+
   return (
     <Card className="p-4 overflow-x-auto">
       <table className="w-full text-sm border-collapse">
         <thead>
           <tr className="text-left text-xs text-neutral-400">
-            <th className="px-3 py-2 cursor-pointer select-none"
-                onClick={() => toggleSort("label")}>
+            <th
+              scope="col"
+              aria-sort={ariaSort("label")}
+              className="px-3 py-2 cursor-pointer select-none"
+              onClick={() => toggleSort("label")}
+            >
               지표{indicator("label")}
             </th>
-            <th className="px-3 py-2 text-right cursor-pointer select-none"
-                onClick={() => toggleSort("a")}>
+            <th
+              scope="col"
+              aria-sort={ariaSort("a")}
+              className="px-3 py-2 text-right cursor-pointer select-none"
+              onClick={() => toggleSort("a")}
+            >
               {dateALabel}{indicator("a")}
             </th>
-            <th className="px-3 py-2 text-right cursor-pointer select-none"
-                onClick={() => toggleSort("b")}>
+            <th
+              scope="col"
+              aria-sort={ariaSort("b")}
+              className="px-3 py-2 text-right cursor-pointer select-none"
+              onClick={() => toggleSort("b")}
+            >
               {dateBLabel}{indicator("b")}
             </th>
-            <th className="px-3 py-2 text-right cursor-pointer select-none"
-                onClick={() => toggleSort("delta")}>
+            <th
+              scope="col"
+              aria-sort={ariaSort("delta")}
+              className="px-3 py-2 text-right cursor-pointer select-none"
+              onClick={() => toggleSort("delta")}
+            >
               Δ{indicator("delta")}
             </th>
           </tr>
