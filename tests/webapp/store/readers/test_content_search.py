@@ -272,3 +272,19 @@ class TestSearch:
         ])
         result = reader.search(q="a", categories=None, date_from=None, date_to=None, page=1, size=20)
         assert set(result["categories"]) == {"기업", "시장"}
+
+    def test_search_like_fallback_for_short_query(self, tmp_path):
+        """2글자 쿼리는 trigram 인덱싱 안 되지만 LIKE 폴백으로 매칭."""
+        reader = self._setup(tmp_path, [
+            {"name": "a.md", "title": "AI 테마 분석", "body": "인공지능 관련 리포트"},
+            {"name": "b.md", "title": "다른 주제", "body": "관련 없음"},
+        ])
+        result = reader.search(
+            q="AI", categories=None, date_from=None, date_to=None,
+            page=1, size=20,
+        )
+        filenames = [i["filename"] for i in result["items"]]
+        assert "a.md" in filenames
+        # highlight 는 <mark> 포함되어야 함 (FTS 경로와 동등)
+        hl = next(i["highlight"] for i in result["items"] if i["filename"] == "a.md")
+        assert "<mark>" in hl and "</mark>" in hl

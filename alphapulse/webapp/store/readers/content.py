@@ -68,6 +68,28 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         return {}, body
 
 
+def _wrap_mark_snippet(text: str, term: str, context_chars: int = 16) -> str:
+    """텍스트에서 term 첫 번째 위치를 <mark>로 감싼 스니펫 반환.
+
+    FTS5 snippet() 과 동일한 형태로 LIKE 폴백 결과를 포맷한다.
+    매치 없으면 텍스트 앞 60자를 반환.
+    """
+    if not text or not term:
+        return ""
+    lower = text.lower()
+    pos = lower.find(term.lower())
+    if pos < 0:
+        return text[:60]
+    start = max(0, pos - context_chars)
+    end = min(len(text), pos + len(term) + context_chars)
+    prefix = "…" if start > 0 else ""
+    suffix = "…" if end < len(text) else ""
+    before = text[start:pos]
+    matched = text[pos:pos + len(term)]
+    after = text[pos + len(term):end]
+    return f"{prefix}{before}<mark>{matched}</mark>{after}{suffix}"
+
+
 def _sanitize_fts_query(raw):
     """사용자 입력을 FTS5 MATCH 로 안전하게 변환.
 
@@ -403,18 +425,37 @@ class ContentReader:
                 ).fetchall()
                 # FTS5 trigram requires ≥3 chars; fall back to LIKE for short queries
                 if not rows and cleaned_q:
-                    like_pat = f"%{cleaned_q}%"
-                    rows = conn.execute(
+                    escaped = (
+                        cleaned_q
+                        .replace("\\", "\\\\")
+                        .replace("%", "\\%")
+                        .replace("_", "\\_")
+                    )
+                    like_pat = f"%{escaped}%"
+                    like_rows = conn.execute(
                         """
                         SELECT
                             filename,
-                            title AS highlight,
+                            title,
+                            body,
                             0.0 AS rank
                         FROM reports_fts
-                        WHERE title LIKE ? OR body LIKE ?
+                        WHERE title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'
                         """,
                         (like_pat, like_pat),
                     ).fetchall()
+                    # body를 우선해 highlight 생성; body에 없으면 title에서 추출
+                    built = []
+                    for r in like_rows:
+                        body_hl = _wrap_mark_snippet(r["body"], cleaned_q)
+                        title_hl = _wrap_mark_snippet(r["title"], cleaned_q)
+                        highlight = body_hl if "<mark>" in body_hl else title_hl
+                        built.append({
+                            "filename": r["filename"],
+                            "highlight": highlight,
+                            "rank": r["rank"],
+                        })
+                    rows = built
         except sqlite3.OperationalError as e:
             logger.warning("content_search MATCH failed for %r: %s", q, e)
             rows = []
