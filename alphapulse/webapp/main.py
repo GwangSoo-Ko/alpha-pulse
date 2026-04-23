@@ -100,7 +100,15 @@ def create_app(
     data_status_reader = DataStatusReader(trading_db_path=trading_db)
     audit_reader = AuditReader(db_path=audit_db)
     pulse_history = PulseHistory(db_path=core.HISTORY_DB)
-    content_reader = ContentReader(reports_dir=core.REPORTS_DIR)
+    content_reader = ContentReader(
+        reports_dir=core.REPORTS_DIR,
+        fts_db_path=core.CONTENT_SEARCH_DB,
+    )
+    try:
+        stats = content_reader.build_index()
+        logger.info("content_search index built: %s", stats)
+    except Exception as e:
+        logger.warning("content_search index build failed: %s", e)
     briefing_store = BriefingStore(db_path=core.BRIEFINGS_DB)
     feedback_store = FeedbackStore(db_path=core.FEEDBACK_DB)
 

@@ -25,6 +25,7 @@ class ReportSummary(BaseModel):
     analyzed_at: str
     source: str
     source_tag: str = ""
+    highlight: str | None = None
 
 
 class ReportListResponse(BaseModel):
@@ -100,7 +101,19 @@ async def list_reports(
         size=size,
     )
     return ReportListResponse(
-        items=[ReportSummary(**i) for i in result["items"]],
+        items=[
+            ReportSummary(
+                filename=i["filename"],
+                title=i["title"],
+                category=i["category"],
+                published=i["published"],
+                analyzed_at=i["analyzed_at"],
+                source=i["source"],
+                source_tag=i.get("source_tag", ""),
+                highlight=i.get("highlight"),
+            )
+            for i in result["items"]
+        ],
         page=result["page"],
         size=result["size"],
         total=result["total"],

@@ -253,3 +253,90 @@ def test_run_audit_log(client, app, monkeypatch):
     data = call.kwargs.get("data", {})
     assert "user_id" in data
     assert "job_id" in data
+
+
+# ── FTS highlight 테스트 ──────────────────────────────────────────────────────
+
+@pytest.fixture
+def app_fts(webapp_db, reports_dir, tmp_path):
+    fts_db = tmp_path / "fts.db"
+    cfg = WebAppConfig(
+        session_secret="x" * 32,
+        monitor_bot_token="", monitor_channel_id="",
+        db_path=str(webapp_db),
+    )
+    a = FastAPI()
+    a.state.config = cfg
+    a.state.users = UserRepository(db_path=webapp_db)
+    a.state.sessions = SessionRepository(db_path=webapp_db)
+    a.state.login_attempts = LoginAttemptsRepository(db_path=webapp_db)
+    a.state.jobs = JobRepository(db_path=webapp_db)
+    a.state.job_runner = JobRunner(job_repo=a.state.jobs)
+    a.state.content_reader = ContentReader(reports_dir=reports_dir, fts_db_path=fts_db)
+    a.state.audit = MagicMock()
+    a.state.users.create(
+        email="b@x.com",
+        password_hash=hash_password("long-enough-pw!"),
+        role="user",
+    )
+    a.add_middleware(CSRFMiddleware, secret=cfg.session_secret)
+    from fastapi import Request as _Request
+    @a.get("/api/v1/csrf-token")
+    async def csrf_token(_request: _Request):
+        return {"token": _request.state.csrf_token}
+    a.include_router(auth_router)
+    a.include_router(jobs_router)
+    a.include_router(content_router)
+    return a
+
+
+@pytest.fixture
+def client_fts(app_fts):
+    c = TestClient(app_fts, base_url="https://testserver")
+    r = c.get("/api/v1/csrf-token")
+    token = r.json()["token"]
+    c.post(
+        "/api/v1/auth/login",
+        json={"email": "b@x.com", "password": "long-enough-pw!"},
+        headers={"x-csrf-token": token},
+    )
+    c.headers.update({"X-CSRF-Token": token})
+    return c
+
+
+def test_list_reports_with_q_includes_highlight(client_fts, app_fts, reports_dir):
+    """q 파라미터 있을 때 응답 items 에 highlight (<mark>) 포함."""
+    _write_report(
+        reports_dir, "hl_a.md",
+        title="반도체 분석",
+        category="시장",
+        published="2026-04-01",
+        analyzed_at="2026-04-02 10:00:00",
+        body="반도체 시장 전망",
+    )
+    app_fts.state.content_reader.build_index()
+    r = client_fts.get("/api/v1/content/reports?q=반도체")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] >= 1
+    item = body["items"][0]
+    assert item.get("highlight") is not None
+    assert "<mark>" in item["highlight"]
+
+
+def test_list_reports_without_q_highlight_is_none(client_fts, app_fts, reports_dir):
+    """q 없을 때 모든 items 의 highlight 는 None."""
+    _write_report(
+        reports_dir, "hl_b.md",
+        title="일반 리포트",
+        category="경제",
+        published="2026-04-01",
+        analyzed_at="2026-04-02 10:00:00",
+        body="본문 내용",
+    )
+    app_fts.state.content_reader.build_index()
+    r = client_fts.get("/api/v1/content/reports")
+    assert r.status_code == 200
+    body = r.json()
+    for item in body["items"]:
+        assert item.get("highlight") is None

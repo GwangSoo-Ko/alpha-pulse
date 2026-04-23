@@ -109,6 +109,17 @@ class BlogMonitor:
             original_content=crawl_result["content"],
         )
 
+        try:
+            from alphapulse.webapp.store.readers.content import ContentReader
+
+            reader = ContentReader(
+                reports_dir=self.reporter.reports_dir,
+                fts_db_path=_cfg.CONTENT_SEARCH_DB,
+            )
+            await asyncio.to_thread(reader.upsert_index, report_path.name)
+        except Exception as e:
+            logger.warning("content_search upsert failed for %s: %s", report_path.name, e)
+
         if send_telegram:
             await self.notifier.send(
                 title=post["title"],
