@@ -250,15 +250,15 @@ class FeedbackStore:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(sql, params)
 
-    def get_recent(self, limit: int = 30) -> list[dict]:
+    def get_recent(self, limit: int = 30, offset: int = 0) -> list[dict]:
         """최근 N건의 피드백 레코드를 조회한다.
 
-        `signal_feedback.date` 가 PRIMARY KEY 이므로 날짜당 1행. 거래일(신호가
-        없는 주말/공휴일 제외)의 최근 `limit` 건을 반환. 달력일 기준 구간이
-        아니다 — 주의.
+        signal_feedback.date 가 PRIMARY KEY 이므로 날짜당 1행. 거래일(신호가
+        없는 주말/공휴일 제외)의 최근 `limit` 건을 반환. offset 으로 페이지네이션.
 
         Args:
             limit: 조회할 최대 행 수. 기본값 30.
+            offset: 건너뛸 행 수. 기본값 0.
 
         Returns:
             피드백 딕셔너리 리스트 (날짜 내림차순).
@@ -268,8 +268,8 @@ class FeedbackStore:
             cursor = conn.execute(
                 "SELECT * FROM signal_feedback "
                 "ORDER BY date DESC "
-                "LIMIT ?",
-                (limit,),
+                "LIMIT ? OFFSET ?",
+                (limit, offset),
             )
             rows = cursor.fetchall()
 

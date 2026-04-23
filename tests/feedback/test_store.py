@@ -107,3 +107,15 @@ def test_indexes_exist(store):
     assert "idx_feedback_hit_1d" in names
     assert "idx_feedback_hit_3d" in names
     assert "idx_feedback_hit_5d" in names
+
+
+def test_get_recent_offset(store):
+    for i in range(5):
+        date = f"2026040{i+1}" if i < 9 else f"202604{i+1}"
+        store.save_signal(date, float(i * 10), "매수 우위", {})
+    first = store.get_recent(limit=2, offset=0)
+    second = store.get_recent(limit=2, offset=2)
+    third = store.get_recent(limit=2, offset=4)
+    assert [r["date"] for r in first] == ["20260405", "20260404"]  # DESC
+    assert [r["date"] for r in second] == ["20260403", "20260402"]
+    assert [r["date"] for r in third] == ["20260401"]

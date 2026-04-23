@@ -270,15 +270,35 @@ async def get_history(
     user: User = Depends(get_current_user),
     store: FeedbackStore = Depends(get_feedback_store),
 ):
-    rows = store.get_recent(limit=days)
-    total = len(rows)
-    start = (page - 1) * size
-    sliced = rows[start:start + size]
+    # 총 건수는 days 범위 기준 (기존 동작 유지)
+    total_rows = store.get_recent(limit=days)
+    total = len(total_rows)
+    offset = (page - 1) * size
+    # page 가 days 범위 초과하면 빈 페이지
+    if offset >= days:
+        page_rows = []
+    else:
+        page_rows = store.get_recent(limit=size, offset=offset)
+
     return FeedbackHistoryResponse(
-        items=[_row_to_history_item(r) for r in sliced],
+        items=[
+            SignalHistoryItem(
+                date=r["date"],
+                score=float(r["score"]),
+                signal=r["signal"],
+                kospi_change_pct=r["kospi_change_pct"],
+                return_1d=r["return_1d"],
+                return_3d=r["return_3d"],
+                return_5d=r["return_5d"],
+                hit_1d=_int_to_bool(r["hit_1d"]),
+                hit_3d=_int_to_bool(r["hit_3d"]),
+                hit_5d=_int_to_bool(r["hit_5d"]),
+            )
+            for r in page_rows
+        ],
         page=page,
         size=size,
-        total=total,
+        total=min(total, days),
     )
 
 
