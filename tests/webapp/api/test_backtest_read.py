@@ -219,3 +219,62 @@ class TestBacktestRead:
         r = client.get("/api/v1/backtest/runs?name=alpha")
         assert r.json()["total"] == 1
         assert r.json()["items"][0]["name"] == "alpha-strategy"
+
+    # --- runs sort ---
+    def test_runs_sort_by_name(self, app, client):
+        store = BacktestStore(db_path=app._bt_db)
+        _seed(store, name="zzz")
+        _seed(store, name="aaa")
+        r = client.get("/api/v1/backtest/runs?sort=name&dir=asc")
+        assert r.status_code == 200
+        names = [i["name"] for i in r.json()["items"]]
+        assert names == sorted(names)
+
+    # --- runs export ---
+    def test_runs_export_returns_csv_with_bom(self, app, client):
+        """runs export 응답이 CSV + BOM + 헤더 포함."""
+        store = BacktestStore(db_path=app._bt_db)
+        _seed(store, name="export-test")
+        r = client.get("/api/v1/backtest/runs/export")
+        assert r.status_code == 200
+        assert "text/csv" in r.headers["content-type"]
+        body = r.content.decode("utf-8")
+        assert body.startswith("\ufeff")
+        lines = body.lstrip("\ufeff").strip().split("\r\n")
+        assert lines[0].startswith("이름,전략")
+
+    def test_runs_export_applies_sort(self, app, client):
+        """sort 파라미터 전달 시 CSV 순서 반영."""
+        store = BacktestStore(db_path=app._bt_db)
+        _seed(store, name="zzz-export")
+        _seed(store, name="aaa-export")
+        r = client.get("/api/v1/backtest/runs/export?sort=name&dir=asc")
+        assert r.status_code == 200
+
+    # --- trades export ---
+    def test_trades_export_returns_csv(self, app, client):
+        store = BacktestStore(db_path=app._bt_db)
+        rid = _seed(store, name="trades-export-test")
+        r = client.get(f"/api/v1/backtest/runs/{rid}/trades/export")
+        assert r.status_code == 200
+        assert "text/csv" in r.headers["content-type"]
+        body = r.content.decode("utf-8")
+        assert body.startswith("\ufeff")
+        lines = body.lstrip("\ufeff").strip().split("\r\n")
+        assert lines[0]  # 헤더 존재
+
+    def test_trades_export_run_not_found(self, client):
+        r = client.get("/api/v1/backtest/runs/nonexistent/trades/export")
+        assert r.status_code == 404
+
+    # --- positions export ---
+    def test_positions_export_returns_csv(self, app, client):
+        store = BacktestStore(db_path=app._bt_db)
+        rid = _seed(store, name="positions-export-test")
+        r = client.get(f"/api/v1/backtest/runs/{rid}/positions/export")
+        assert r.status_code == 200
+        assert "text/csv" in r.headers["content-type"]
+
+    def test_positions_export_run_not_found(self, client):
+        r = client.get("/api/v1/backtest/runs/nonexistent/positions/export")
+        assert r.status_code == 404
