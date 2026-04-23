@@ -94,3 +94,16 @@ def test_update_partial_returns(store):
 
 def test_get_nonexistent(store):
     assert store.get("99991231") is None
+
+
+def test_indexes_exist(store):
+    """hit_1d/3d/5d 에 partial 인덱스가 생성되어야 한다."""
+    import sqlite3
+    with sqlite3.connect(store.db_path) as conn:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"
+        ).fetchall()
+    names = {r[0] for r in rows}
+    assert "idx_feedback_hit_1d" in names
+    assert "idx_feedback_hit_3d" in names
+    assert "idx_feedback_hit_5d" in names

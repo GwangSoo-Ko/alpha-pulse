@@ -55,6 +55,19 @@ class FeedbackStore:
                 )
                 """
             )
+            # Partial indexes on hit flags — skip NULL (unevaluated) rows
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_hit_1d "
+                "ON signal_feedback(hit_1d) WHERE hit_1d IS NOT NULL"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_hit_3d "
+                "ON signal_feedback(hit_3d) WHERE hit_3d IS NOT NULL"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_hit_5d "
+                "ON signal_feedback(hit_5d) WHERE hit_5d IS NOT NULL"
+            )
 
     def save_signal(
         self,
