@@ -158,3 +158,36 @@ def test_get_indicator_heatmap_score_is_float(evaluator, store):
     result = evaluator.get_indicator_heatmap(days=30)
     assert isinstance(result[0]["score"], float)
     assert result[0]["score"] == 80.0
+
+
+def test_get_signal_breakdown_empty_returns_empty_list(evaluator):
+    assert evaluator.get_signal_breakdown(days=30) == []
+
+
+def test_get_signal_breakdown_groups_by_signal(evaluator, store):
+    # 3건 "매수 우위" (2건 hit=1, 1건 hit=0), 2건 "매도 우위" (둘 다 hit=1)
+    for i, (sig, hit) in enumerate([
+        ("매수 우위", 1), ("매수 우위", 1), ("매수 우위", 0),
+        ("매도 우위", 1), ("매도 우위", 1),
+    ]):
+        date = f"202604{i+1:02d}"
+        store.save_signal(date, 40.0 if "매수" in sig else -30.0, sig, {})
+        store.update_result(date, 2650, 0.5, 870, 0.1, 0.3, hit)
+    result = evaluator.get_signal_breakdown(days=30)
+    by_signal = {r["signal"]: r for r in result}
+    assert by_signal["매수 우위"]["count"] == 3
+    assert by_signal["매수 우위"]["hit_rate_1d"] == pytest.approx(2 / 3, abs=0.01)
+    assert by_signal["매도 우위"]["count"] == 2
+    assert by_signal["매도 우위"]["hit_rate_1d"] == 1.0
+
+
+def test_get_signal_breakdown_null_when_all_unevaluated(evaluator, store):
+    store.save_signal("20260401", 40.0, "매수 우위", {})
+    store.save_signal("20260402", 40.0, "매수 우위", {})
+    result = evaluator.get_signal_breakdown(days=30)
+    assert len(result) == 1
+    assert result[0]["signal"] == "매수 우위"
+    assert result[0]["count"] == 2
+    assert result[0]["hit_rate_1d"] is None
+    assert result[0]["hit_rate_3d"] is None
+    assert result[0]["hit_rate_5d"] is None

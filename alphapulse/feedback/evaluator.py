@@ -150,6 +150,32 @@ class FeedbackEvaluator:
                     continue
         return cells
 
+    def get_signal_breakdown(self, days: int = 30) -> list[dict]:
+        """signal 값 기준 group by. count + hit_rate (1d/3d/5d) 평균.
+
+        Returns: [{signal, count, hit_rate_1d, hit_rate_3d, hit_rate_5d}]
+        """
+        from collections import defaultdict
+        records = self.store.get_recent(limit=days)
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for r in records:
+            groups[r["signal"]].append(r)
+
+        def _rate(group: list[dict], key: str) -> float | None:
+            vals = [r[key] for r in group if r[key] is not None]
+            return round(sum(vals) / len(vals), 4) if vals else None
+
+        return [
+            {
+                "signal": signal,
+                "count": len(group),
+                "hit_rate_1d": _rate(group, "hit_1d"),
+                "hit_rate_3d": _rate(group, "hit_3d"),
+                "hit_rate_5d": _rate(group, "hit_5d"),
+            }
+            for signal, group in groups.items()
+        ]
+
     def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
         """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
 
