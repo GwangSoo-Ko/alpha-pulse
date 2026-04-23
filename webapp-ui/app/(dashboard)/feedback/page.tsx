@@ -1,5 +1,6 @@
 import { cookies } from "next/headers"
 import { apiFetch } from "@/lib/api-client"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { HitRateCards, type HitRates } from "@/components/domain/feedback/hit-rate-cards"
 import { CorrelationCard } from "@/components/domain/feedback/correlation-card"
 import {
@@ -12,6 +13,22 @@ import {
 } from "@/components/domain/feedback/signal-history-table"
 import { PeriodToggle } from "@/components/domain/feedback/period-toggle"
 import { NoFeedback } from "@/components/domain/feedback/no-feedback"
+import {
+  HitRateTrendChart,
+  type HitRateTrendPoint,
+} from "@/components/domain/feedback/hit-rate-trend-chart"
+import {
+  ScoreReturnScatter,
+  type ScoreReturnPoint,
+} from "@/components/domain/feedback/score-return-scatter"
+import {
+  IndicatorHeatmap,
+  type IndicatorHeatmapCell,
+} from "@/components/domain/feedback/indicator-heatmap"
+import {
+  SignalBreakdownTable,
+  type SignalBreakdownRow,
+} from "@/components/domain/feedback/signal-breakdown-table"
 
 export const dynamic = "force-dynamic"
 
@@ -34,6 +51,14 @@ type HistoryResponse = {
   total: number
 }
 
+type AnalyticsResponse = {
+  days: number
+  hit_rate_trend: HitRateTrendPoint[]
+  score_return_points: ScoreReturnPoint[]
+  indicator_heatmap: IndicatorHeatmapCell[]
+  signal_breakdown: SignalBreakdownRow[]
+}
+
 export default async function FeedbackPage({ searchParams }: Props) {
   const sp = await searchParams
   const days = Math.min(365, Math.max(1, Number(sp.days || 30)))
@@ -44,13 +69,17 @@ export default async function FeedbackPage({ searchParams }: Props) {
     cookie: cookieStore.getAll().map((c) => `${c.name}=${c.value}`).join("; "),
   }
 
-  const [summary, history] = await Promise.all([
+  const [summary, history, analytics] = await Promise.all([
     apiFetch<SummaryResponse>(
       `/api/v1/feedback/summary?days=${days}`,
       { headers: h, cache: "no-store" },
     ),
     apiFetch<HistoryResponse>(
       `/api/v1/feedback/history?days=${days}&page=${page}&size=20`,
+      { headers: h, cache: "no-store" },
+    ),
+    apiFetch<AnalyticsResponse>(
+      `/api/v1/feedback/analytics?days=${days}`,
       { headers: h, cache: "no-store" },
     ),
   ])
@@ -66,17 +95,36 @@ export default async function FeedbackPage({ searchParams }: Props) {
       {empty ? (
         <NoFeedback />
       ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="md:col-span-1">
+        <Tabs defaultValue="summary" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="summary">요약</TabsTrigger>
+            <TabsTrigger value="trend">추이</TabsTrigger>
+            <TabsTrigger value="indicators">지표</TabsTrigger>
+            <TabsTrigger value="history">이력</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="summary" className="space-y-4">
+            <HitRateCards rates={summary.hit_rates} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <CorrelationCard correlation={summary.correlation} />
             </div>
-            <div className="md:col-span-1"></div>
-          </div>
-          <HitRateCards rates={summary.hit_rates} />
-          <IndicatorAccuracyChart items={summary.indicator_accuracy} />
-          <SignalHistoryTable data={history} />
-        </>
+            <SignalBreakdownTable rows={analytics.signal_breakdown} />
+          </TabsContent>
+
+          <TabsContent value="trend" className="space-y-4">
+            <HitRateTrendChart points={analytics.hit_rate_trend} />
+            <ScoreReturnScatter points={analytics.score_return_points} />
+          </TabsContent>
+
+          <TabsContent value="indicators" className="space-y-4">
+            <IndicatorAccuracyChart items={summary.indicator_accuracy} />
+            <IndicatorHeatmap cells={analytics.indicator_heatmap} />
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-4">
+            <SignalHistoryTable data={history} />
+          </TabsContent>
+        </Tabs>
       )}
     </div>
   )

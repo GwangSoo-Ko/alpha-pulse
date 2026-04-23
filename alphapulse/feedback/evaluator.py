@@ -98,3 +98,104 @@ class FeedbackEvaluator:
         corr_matrix = np.corrcoef(scores, returns)
         corr = float(corr_matrix[0, 1])
         return round(corr, 3) if not np.isnan(corr) else None
+
+    def get_score_return_points(self, days: int = 30) -> list[dict]:
+        """return_1d 평가된 레코드만 score-return 점으로 변환.
+
+        Returns: [{date, score, return_1d, signal}]
+        """
+        records = self.store.get_recent(limit=days)
+        return [
+            {
+                "date": r["date"],
+                "score": float(r["score"]),
+                "return_1d": float(r["return_1d"]),
+                "signal": r["signal"],
+            }
+            for r in records
+            if r["return_1d"] is not None
+        ]
+
+    def get_indicator_heatmap(self, days: int = 30) -> list[dict]:
+        """각 (date, indicator) 별 score flat list. None 은 skip.
+
+        indicator_scores 는 JSON 문자열 또는 이미 dict.
+        파싱 실패 시 해당 record 전체 skip (로그 warning).
+
+        Returns: [{date, indicator, score}]
+        """
+        records = self.store.get_recent(limit=days)
+        cells: list[dict] = []
+        for record in records:
+            raw = record["indicator_scores"]
+            try:
+                scores = (
+                    json.loads(raw) if isinstance(raw, str) else raw
+                )
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("indicator_heatmap: skip %s — JSON parse fail", record["date"])
+                continue
+            if not isinstance(scores, dict):
+                continue
+            for key, value in scores.items():
+                if value is None:
+                    continue
+                try:
+                    cells.append({
+                        "date": record["date"],
+                        "indicator": key,
+                        "score": float(value),
+                    })
+                except (TypeError, ValueError):
+                    continue
+        return cells
+
+    def get_signal_breakdown(self, days: int = 30) -> list[dict]:
+        """signal 값 기준 group by. count + hit_rate (1d/3d/5d) 평균.
+
+        Returns: [{signal, count, hit_rate_1d, hit_rate_3d, hit_rate_5d}]
+        """
+        from collections import defaultdict
+        records = self.store.get_recent(limit=days)
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for r in records:
+            groups[r["signal"]].append(r)
+
+        def _rate(group: list[dict], key: str) -> float | None:
+            vals = [r[key] for r in group if r[key] is not None]
+            return round(sum(vals) / len(vals), 4) if vals else None
+
+        return [
+            {
+                "signal": signal,
+                "count": len(group),
+                "hit_rate_1d": _rate(group, "hit_1d"),
+                "hit_rate_3d": _rate(group, "hit_3d"),
+                "hit_rate_5d": _rate(group, "hit_5d"),
+            }
+            for signal, group in groups.items()
+        ]
+
+    def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
+        """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
+
+        Args:
+            days: 조회 기간 (최대 레코드 수).
+            window: rolling window 일수.
+
+        Returns:
+            [{date, rolling_hit_rate_1d}] — window 내 평가 0건이면 None.
+        """
+        records = self.store.get_recent(limit=days)
+        # DESC → ASC
+        records_asc = list(reversed(records))
+        result: list[dict] = []
+        for i in range(len(records_asc)):
+            window_records = records_asc[max(0, i - window + 1): i + 1]
+            evaluated = [r["hit_1d"] for r in window_records if r["hit_1d"] is not None]
+            avg = round(sum(evaluated) / len(evaluated), 4) if evaluated else None
+            result.append({
+                "date": records_asc[i]["date"],
+                "rolling_hit_rate_1d": avg,
+            })
+        return result

@@ -33,4 +33,42 @@ test.describe("Feedback", () => {
       ).toBeVisible()
     }
   })
+
+  test("탭 4개 렌더 + 기본 요약 탭", async ({ page }) => {
+    await page.goto("/feedback")
+    const empty = page.getByText("평가된 시그널이 없습니다")
+    const isEmpty = await empty.isVisible().catch(() => false)
+    test.skip(isEmpty, "DB 비어있음 — 탭 스모크 스킵")
+    await expect(page.getByRole("tab", { name: "요약" })).toBeVisible()
+    await expect(page.getByRole("tab", { name: "추이" })).toBeVisible()
+    await expect(page.getByRole("tab", { name: "지표" })).toBeVisible()
+    await expect(page.getByRole("tab", { name: "이력" })).toBeVisible()
+  })
+
+  test("추이 탭 클릭 → HitRateTrendChart 영역", async ({ page }) => {
+    await page.goto("/feedback")
+    const empty = page.getByText("평가된 시그널이 없습니다")
+    const isEmpty = await empty.isVisible().catch(() => false)
+    test.skip(isEmpty, "DB 비어있음")
+    await page.getByRole("tab", { name: "추이" }).click()
+    await expect(page.getByText(/적중률 추이/)).toBeVisible()
+  })
+
+  test("지표 탭 클릭 → 히트맵 영역", async ({ page }) => {
+    await page.goto("/feedback")
+    const empty = page.getByText("평가된 시그널이 없습니다")
+    const isEmpty = await empty.isVisible().catch(() => false)
+    test.skip(isEmpty, "DB 비어있음")
+    await page.getByRole("tab", { name: "지표" }).click()
+    await expect(page.getByText(/지표 히트맵/)).toBeVisible()
+  })
+
+  test("이력 탭 클릭 → 시그널 히스토리 테이블", async ({ page }) => {
+    await page.goto("/feedback")
+    const empty = page.getByText("평가된 시그널이 없습니다")
+    const isEmpty = await empty.isVisible().catch(() => false)
+    test.skip(isEmpty, "DB 비어있음")
+    await page.getByRole("tab", { name: "이력" }).click()
+    await expect(page.getByRole("table")).toBeVisible()
+  })
 })

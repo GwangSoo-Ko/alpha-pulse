@@ -81,6 +81,40 @@ class FeedbackDetail(BaseModel):
     created_at: float
 
 
+class HitRateTrendPoint(BaseModel):
+    date: str
+    rolling_hit_rate_1d: float | None
+
+
+class ScoreReturnPoint(BaseModel):
+    date: str
+    score: float
+    return_1d: float
+    signal: str
+
+
+class IndicatorHeatmapCell(BaseModel):
+    date: str
+    indicator: str
+    score: float
+
+
+class SignalBreakdownRow(BaseModel):
+    signal: str
+    count: int
+    hit_rate_1d: float | None
+    hit_rate_3d: float | None
+    hit_rate_5d: float | None
+
+
+class AnalyticsResponse(BaseModel):
+    days: int
+    hit_rate_trend: list[HitRateTrendPoint]
+    score_return_points: list[ScoreReturnPoint]
+    indicator_heatmap: list[IndicatorHeatmapCell]
+    signal_breakdown: list[SignalBreakdownRow]
+
+
 def get_feedback_store(request: Request) -> FeedbackStore:
     return request.app.state.feedback_store
 
@@ -239,6 +273,22 @@ async def get_history(
         page=page,
         size=size,
         total=total,
+    )
+
+
+@router.get("/analytics", response_model=AnalyticsResponse)
+async def get_analytics(
+    days: int = Query(30, ge=1, le=365),
+    user: User = Depends(get_current_user),
+    evaluator: FeedbackEvaluator = Depends(get_feedback_evaluator),
+):
+    """4개 시각화 데이터셋 번들."""
+    return AnalyticsResponse(
+        days=days,
+        hit_rate_trend=[HitRateTrendPoint(**p) for p in evaluator.get_hit_rate_trend(days=days)],
+        score_return_points=[ScoreReturnPoint(**p) for p in evaluator.get_score_return_points(days=days)],
+        indicator_heatmap=[IndicatorHeatmapCell(**c) for c in evaluator.get_indicator_heatmap(days=days)],
+        signal_breakdown=[SignalBreakdownRow(**r) for r in evaluator.get_signal_breakdown(days=days)],
     )
 
 
