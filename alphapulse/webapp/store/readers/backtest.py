@@ -60,7 +60,17 @@ class BacktestReader:
         page: int = 1,
         size: int = 20,
         name_contains: str | None = None,
+        sort: str = "created_at",
+        dir: str = "desc",
     ) -> Page:
+        ALLOWED = {"created_at", "name", "start_date", "final_return"}
+        col = sort if sort in ALLOWED else "created_at"
+        direction = "ASC" if dir.lower() == "asc" else "DESC"
+        # final_return 은 metrics JSON 안의 값 — json_extract 사용
+        if col == "final_return":
+            order_expr = "CAST(json_extract(metrics, '$.final_return') AS REAL)"
+        else:
+            order_expr = col
         offset = (page - 1) * size
         where = ""
         params: list = []
@@ -74,7 +84,7 @@ class BacktestReader:
             ).fetchone()[0]
             rows = conn.execute(
                 f"SELECT * FROM runs {where} "
-                f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                f"ORDER BY {order_expr} {direction} LIMIT ? OFFSET ?",
                 [*params, size, offset],
             ).fetchall()
         items = [self._row_to_summary(r) for r in rows]
