@@ -36,6 +36,7 @@ export default async function PositionsPage({ params, searchParams }: Props) {
           포지션 이력 — {run.name || runId.slice(0, 8)}
         </h1>
         <PositionViewer
+          runId={runId}
           positions={pos.items}
           initialDate={sp.date}
           initialCode={sp.code}

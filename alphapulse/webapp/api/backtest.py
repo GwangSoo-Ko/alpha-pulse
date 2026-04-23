@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from alphapulse.webapp.auth.deps import get_current_user, require_role
 from alphapulse.webapp.store.readers.backtest import BacktestReader
 from alphapulse.webapp.store.users import User
+from alphapulse.webapp.utils.csv_stream import csv_filename, stream_csv_response
 
 router = APIRouter(prefix="/api/v1/backtest", tags=["backtest"])
 
@@ -55,15 +56,56 @@ async def list_runs(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     name: str | None = None,
+    sort: str = Query("created_at"),
+    dir: str = Query("desc"),
     _: User = Depends(get_current_user),
     reader: BacktestReader = Depends(get_reader),
 ):
-    p = reader.list_runs(page=page, size=size, name_contains=name)
+    p = reader.list_runs(page=page, size=size, name_contains=name, sort=sort, dir=dir)
     return RunListResponse(
         items=[RunSummaryResponse(**s.__dict__) for s in p.items],
         page=p.page,
         size=p.size,
         total=p.total,
+    )
+
+
+@router.get("/runs/export")
+async def export_runs(
+    name: str | None = None,
+    sort: str = Query("created_at"),
+    dir: str = Query("desc"),
+    _: User = Depends(get_current_user),
+    reader: BacktestReader = Depends(get_reader),
+):
+    p = reader.list_runs(page=1, size=10_000, name_contains=name, sort=sort, dir=dir)
+
+    def _format(s):
+        strategies = s.strategies if isinstance(s.strategies, list) else []
+        final_return = ""
+        if isinstance(s.metrics, dict):
+            final_return = s.metrics.get("final_return", "")
+        return {
+            "name": s.name,
+            "strategies": ",".join(strategies) if strategies else "",
+            "start_date": s.start_date,
+            "end_date": s.end_date,
+            "final_return": final_return,
+            "run_id": s.run_id,
+        }
+
+    columns = [
+        ("이름", "name"),
+        ("전략", "strategies"),
+        ("시작일", "start_date"),
+        ("종료일", "end_date"),
+        ("최종 수익률", "final_return"),
+        ("Run ID", "run_id"),
+    ]
+    return stream_csv_response(
+        (_format(s) for s in p.items),
+        columns=columns,
+        filename=csv_filename("backtest", "runs"),
     )
 
 
@@ -105,6 +147,54 @@ async def get_trades(
     return {"items": reader.get_trades(s.run_id, code=code, winner=winner)}
 
 
+@router.get("/runs/{run_id}/trades/export")
+async def export_trades(
+    run_id: str,
+    code: str | None = None,
+    winner: bool | None = None,
+    _: User = Depends(get_current_user),
+    reader: BacktestReader = Depends(get_reader),
+):
+    s = reader.resolve_run(run_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Run not found")
+    rows = reader.get_trades(s.run_id, code=code, winner=winner)
+
+    def _format(t):
+        if hasattr(t, "model_dump"):
+            t = t.model_dump()
+        return {
+            "buy_date": t.get("buy_date", ""),
+            "sell_date": t.get("sell_date", ""),
+            "code": t.get("code", ""),
+            "name": t.get("name", ""),
+            "quantity": t.get("quantity", ""),
+            "buy_price": t.get("buy_price", ""),
+            "sell_price": t.get("sell_price", ""),
+            "pnl": t.get("pnl", ""),
+            "return_pct": t.get("return_pct", ""),
+            "holding_days": t.get("holding_days", ""),
+        }
+
+    columns = [
+        ("매수일", "buy_date"),
+        ("매도일", "sell_date"),
+        ("종목코드", "code"),
+        ("종목명", "name"),
+        ("수량", "quantity"),
+        ("매수가", "buy_price"),
+        ("매도가", "sell_price"),
+        ("손익", "pnl"),
+        ("수익률(%)", "return_pct"),
+        ("보유일수", "holding_days"),
+    ]
+    return stream_csv_response(
+        (_format(t) for t in rows),
+        columns=columns,
+        filename=csv_filename("backtest", f"trades_{s.run_id[:8]}"),
+    )
+
+
 @router.get("/runs/{run_id}/positions")
 async def get_positions(
     run_id: str,
@@ -117,6 +207,50 @@ async def get_positions(
     if not s:
         raise HTTPException(status_code=404, detail="Run not found")
     return {"items": reader.get_positions(s.run_id, date=date, code=code)}
+
+
+@router.get("/runs/{run_id}/positions/export")
+async def export_positions(
+    run_id: str,
+    date: str | None = None,
+    code: str | None = None,
+    _: User = Depends(get_current_user),
+    reader: BacktestReader = Depends(get_reader),
+):
+    s = reader.resolve_run(run_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Run not found")
+    rows = reader.get_positions(s.run_id, date=date, code=code)
+
+    def _format(p):
+        if hasattr(p, "model_dump"):
+            p = p.model_dump()
+        return {
+            "date": p.get("date", ""),
+            "code": p.get("code", ""),
+            "name": p.get("name", ""),
+            "quantity": p.get("quantity", ""),
+            "avg_price": p.get("avg_price", ""),
+            "current_price": p.get("current_price", ""),
+            "unrealized_pnl": p.get("unrealized_pnl", ""),
+            "weight": p.get("weight", ""),
+        }
+
+    columns = [
+        ("날짜", "date"),
+        ("종목코드", "code"),
+        ("종목명", "name"),
+        ("수량", "quantity"),
+        ("평단가", "avg_price"),
+        ("현재가", "current_price"),
+        ("미실현손익", "unrealized_pnl"),
+        ("비중", "weight"),
+    ]
+    return stream_csv_response(
+        (_format(p) for p in rows),
+        columns=columns,
+        filename=csv_filename("backtest", f"positions_{s.run_id[:8]}"),
+    )
 
 
 @router.get("/compare")

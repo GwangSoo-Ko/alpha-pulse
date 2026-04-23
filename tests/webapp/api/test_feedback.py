@@ -356,3 +356,38 @@ def test_analytics_endpoint_single_store_call(client, feedback_store, monkeypatc
     assert r.status_code == 200
     # get_all_analytics 는 단일 get_recent 호출만 수행
     assert call_count["n"] == 1
+
+
+def test_history_sort_by_score_desc(client, feedback_store):
+    feedback_store.save_signal("20260401", 10.0, "매수 우위", {})
+    feedback_store.save_signal("20260402", 80.0, "매수 우위", {})
+    r = client.get("/api/v1/feedback/history?sort=score&dir=desc")
+    assert r.status_code == 200
+    scores = [item["score"] for item in r.json()["items"]]
+    assert scores == [80.0, 10.0]
+
+
+def test_history_export_returns_csv_with_bom(client, feedback_store):
+    feedback_store.save_signal("20260401", 40.0, "매수 우위", {})
+    feedback_store.update_result("20260401", 2650, 1.0, 870, 0.5, 1.5, 1)
+    r = client.get("/api/v1/feedback/history/export")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert "attachment" in r.headers["content-disposition"]
+    body = r.content.decode("utf-8")
+    assert body.startswith("\ufeff")
+    lines = body.lstrip("\ufeff").strip().split("\r\n")
+    assert lines[0].startswith("날짜,점수,시그널")
+    assert len(lines) >= 2
+
+
+def test_history_export_applies_sort(client, feedback_store):
+    feedback_store.save_signal("20260401", 10.0, "매수 우위", {})
+    feedback_store.update_result("20260401", 2650, 1.0, 870, 0.5, 0.5, 1)
+    feedback_store.save_signal("20260402", 80.0, "매수 우위", {})
+    feedback_store.update_result("20260402", 2650, 1.0, 870, 0.5, 1.5, 1)
+    r = client.get("/api/v1/feedback/history/export?sort=score&dir=asc")
+    body = r.content.decode("utf-8").lstrip("\ufeff")
+    lines = body.strip().split("\r\n")
+    # 첫 데이터 행 = 가장 낮은 score
+    assert "10" in lines[1]

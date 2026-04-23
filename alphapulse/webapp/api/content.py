@@ -13,6 +13,7 @@ from alphapulse.webapp.services.content_runner import run_content_monitor_async
 from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.readers.content import ContentReader
 from alphapulse.webapp.store.users import User
+from alphapulse.webapp.utils.csv_stream import csv_filename, stream_csv_response
 
 router = APIRouter(prefix="/api/v1/content", tags=["content"])
 
@@ -87,7 +88,8 @@ async def list_reports(
     date_from: str | None = Query(None, alias="from", max_length=8),
     date_to: str | None = Query(None, alias="to", max_length=8),
     q: str | None = Query(None, max_length=200),
-    sort: str = Query("newest", pattern="^(newest|oldest)$"),
+    sort: str = Query("newest"),
+    dir: str = Query("desc"),
     user: User = Depends(get_current_user),
     reader: ContentReader = Depends(get_content_reader),
 ):
@@ -96,7 +98,8 @@ async def list_reports(
         date_from=date_from,
         date_to=date_to,
         query=q,
-        sort=sort,  # type: ignore[arg-type]
+        sort=sort,
+        dir=dir,
         page=page,
         size=size,
     )
@@ -118,6 +121,53 @@ async def list_reports(
         size=result["size"],
         total=result["total"],
         categories=result["categories"],
+    )
+
+
+@router.get("/reports/export")
+async def export_reports(
+    category: list[str] | None = Query(None),
+    date_from: str | None = Query(None, alias="from", max_length=8),
+    date_to: str | None = Query(None, alias="to", max_length=8),
+    q: str | None = Query(None, max_length=200),
+    sort: str = Query("newest"),
+    dir: str = Query("desc"),
+    user: User = Depends(get_current_user),
+    reader: ContentReader = Depends(get_content_reader),
+):
+    result = reader.list_reports(
+        categories=category,
+        date_from=date_from,
+        date_to=date_to,
+        query=q,
+        sort=sort,
+        dir=dir,
+        page=1,
+        size=10_000,
+    )
+
+    columns = [
+        ("제목", "title"),
+        ("카테고리", "category"),
+        ("발행일", "published"),
+        ("분석일", "analyzed_at"),
+        ("파일명", "filename"),
+    ]
+
+    def _rows():
+        for i in result["items"]:
+            yield {
+                "title": i["title"],
+                "category": i["category"],
+                "published": i["published"],
+                "analyzed_at": i["analyzed_at"],
+                "filename": i["filename"],
+            }
+
+    return stream_csv_response(
+        _rows(),
+        columns=columns,
+        filename=csv_filename("content", "reports"),
     )
 
 

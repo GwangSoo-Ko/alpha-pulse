@@ -24,6 +24,34 @@ test.describe.serial("Backtest flow smoke test", () => {
     await expect(page).toHaveURL(/\/backtest\/new/)
   })
 
+  test("runs 테이블 컬럼 클릭 정렬", async ({ page }) => {
+    await page.goto("/backtest")
+    const firstLink = page.locator("a[href*='/backtest/']").first()
+    const visible = await firstLink.isVisible().catch(() => false)
+    test.skip(!visible, "런 데이터 없음")
+    // 이름 컬럼 클릭 → sort=name URL 반영
+    const header = page.getByRole("columnheader", { name: /^이름/ }).first()
+    if (await header.isVisible()) {
+      await header.click()
+      await expect(page).toHaveURL(/sort=name/)
+    }
+  })
+
+  test("runs 내보내기 버튼 클릭 시 다운로드", async ({ page }) => {
+    await page.goto("/backtest")
+    const firstLink = page.locator("a[href*='/backtest/']").first()
+    const visible = await firstLink.isVisible().catch(() => false)
+    test.skip(!visible, "런 데이터 없음")
+    const exportLink = page.getByRole("link", { name: /내보내기/ }).first()
+    if (await exportLink.isVisible()) {
+      const [download] = await Promise.all([
+        page.waitForEvent("download"),
+        exportLink.click(),
+      ])
+      expect(download.suggestedFilename()).toMatch(/backtest_runs_.*\.csv/)
+    }
+  })
+
   test("logout clears session", async ({ page }) => {
     await page.goto("/backtest")
     await page.getByRole("button", { name: "Logout" }).click()

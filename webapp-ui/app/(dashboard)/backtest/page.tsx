@@ -7,12 +7,21 @@ import type { RunList } from "@/lib/types"
 
 export const dynamic = "force-dynamic" // 사용자별 데이터 — 캐시 금지
 
-type Props = { searchParams: Promise<{ page?: string; name?: string }> }
+type Props = {
+  searchParams: Promise<{
+    page?: string
+    name?: string
+    sort?: string
+    dir?: string
+  }>
+}
 
 export default async function BacktestListPage({ searchParams }: Props) {
   const sp = await searchParams
   const page = Number(sp.page ?? 1)
   const name = sp.name ?? ""
+  const sort = sp.sort ?? "created_at"
+  const dir = sp.dir ?? "desc"
 
   const cookieStore = await cookies()
   const cookieHeader = cookieStore
@@ -21,7 +30,13 @@ export default async function BacktestListPage({ searchParams }: Props) {
     .join("; ")
   const runs = await apiFetch<RunList>("/api/v1/backtest/runs", {
     headers: { cookie: cookieHeader },
-    searchParams: { page: String(page), size: "20", name: name || undefined },
+    searchParams: {
+      page: String(page),
+      size: "20",
+      name: name || undefined,
+      sort,
+      dir,
+    },
     cache: "no-store",
   })
 

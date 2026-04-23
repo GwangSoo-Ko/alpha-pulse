@@ -3,7 +3,9 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
+import { ExportButton } from "@/components/ui/export-button"
 import { Input } from "@/components/ui/input"
+import { SortableTh } from "@/components/ui/sortable-th"
 import {
   Table,
   TableBody,
@@ -13,6 +15,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { RunList } from "@/lib/types"
+
+type SortKey = "created_at" | "name" | "start_date" | "final_return"
 
 const fmtPct = (n: number | undefined) =>
   n === undefined ? "-" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`
@@ -30,14 +34,33 @@ export function RunsTable({
   const params = useSearchParams()
   const [name, setName] = useState(currentName)
 
+  const currentSort = (params?.get("sort") ?? "created_at") as SortKey
+  const currentDir = (params?.get("dir") ?? "desc") as "asc" | "desc"
+
   const updateQuery = (patch: Record<string, string | undefined>) => {
-    const sp = new URLSearchParams(params.toString())
+    const sp = new URLSearchParams(params?.toString() ?? "")
     for (const [k, v] of Object.entries(patch)) {
       if (v === undefined || v === "") sp.delete(k)
       else sp.set(k, v)
     }
     router.push(`/backtest?${sp.toString()}`)
   }
+
+  function onSort(key: SortKey) {
+    const sp = new URLSearchParams(params?.toString() ?? "")
+    if (currentSort === key) {
+      sp.set("dir", currentDir === "asc" ? "desc" : "asc")
+    } else {
+      sp.set("sort", key)
+      sp.set("dir", "desc")
+    }
+    sp.delete("page")
+    router.push(`/backtest?${sp}`)
+  }
+
+  const exportQs = new URLSearchParams(params?.toString() ?? "")
+  exportQs.delete("page")
+  const exportHref = `/api/v1/backtest/runs/export?${exportQs}`
 
   const totalPages = Math.max(1, Math.ceil(data.total / data.size))
 
@@ -61,15 +84,51 @@ export function RunsTable({
         </Button>
       </form>
 
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-neutral-400">
+          총 {data.total}건 · 페이지 {currentPage}/{totalPages}
+        </p>
+        <ExportButton href={exportHref} />
+      </div>
+
       <Table>
         <TableHeader>
           <TableRow>
             <TableHead>ID</TableHead>
-            <TableHead>이름</TableHead>
-            <TableHead>기간</TableHead>
-            <TableHead className="text-right">총수익률</TableHead>
+            <SortableTh
+              label="이름"
+              sortKey="name"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-4 py-2"
+            />
+            <SortableTh
+              label="시작일"
+              sortKey="start_date"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-4 py-2"
+            />
+            <SortableTh
+              label="총수익률"
+              sortKey="final_return"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-4 py-2 text-right"
+            />
             <TableHead className="text-right">샤프</TableHead>
             <TableHead className="text-right">MDD</TableHead>
+            <SortableTh
+              label="생성일"
+              sortKey="created_at"
+              currentSort={currentSort}
+              currentDir={currentDir}
+              onSort={onSort}
+              className="px-4 py-2"
+            />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -95,6 +154,11 @@ export function RunsTable({
               </TableCell>
               <TableCell className="text-right font-mono text-red-400">
                 {fmtPct(r.metrics.max_drawdown)}
+              </TableCell>
+              <TableCell className="text-neutral-400 text-xs">
+                {r.created_at
+                  ? new Date(r.created_at * 1000).toISOString().slice(0, 10)
+                  : "-"}
               </TableCell>
             </TableRow>
           ))}

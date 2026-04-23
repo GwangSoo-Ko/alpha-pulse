@@ -1,14 +1,21 @@
 "use client"
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { SortableTh } from "@/components/ui/sortable-th"
+import { ExportButton } from "@/components/ui/export-button"
 import type { Position } from "@/lib/types"
 
+type SortKey = "date" | "code" | "quantity" | "avg_price" | "current_price" | "unrealized_pnl" | "weight"
+type SortDir = "asc" | "desc"
+
 export function PositionViewer({
+  runId,
   positions, initialDate, initialCode, startDate, endDate,
 }: {
+  runId: string
   positions: Position[]
   initialDate?: string
   initialCode?: string
@@ -20,6 +27,9 @@ export function PositionViewer({
   const params = useSearchParams()
   const [date, setDate] = useState(initialDate ?? "")
   const [code, setCode] = useState(initialCode ?? "")
+  const [sort, setSort] = useState<{ col: SortKey; dir: SortDir }>({
+    col: "date", dir: "desc",
+  })
 
   const apply = () => {
     const sp = new URLSearchParams(params.toString())
@@ -28,10 +38,34 @@ export function PositionViewer({
     router.push(`${path}?${sp.toString()}`)
   }
 
+  function onSort(col: SortKey) {
+    setSort((prev) =>
+      prev.col === col
+        ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { col, dir: col === "code" ? "asc" : "desc" },
+    )
+  }
+
+  const sorted = useMemo(() => {
+    const copy = [...positions]
+    copy.sort((a, b) => {
+      const av = (a as Record<string, unknown>)[sort.col]
+      const bv = (b as Record<string, unknown>)[sort.col]
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0
+      return sort.dir === "asc" ? cmp : -cmp
+    })
+    return copy
+  }, [positions, sort])
+
   // 날짜 유니크 리스트 (최근 20개만 슬라이스용)
   const uniqueDates = [...new Set(positions.map((p) => p.date))].sort()
 
   const total = positions.reduce((s, p) => s + p.unrealized_pnl, 0)
+
+  const exportHref = `/api/v1/backtest/runs/${runId}/positions/export`
 
   return (
     <div className="space-y-4">
@@ -55,6 +89,9 @@ export function PositionViewer({
             router.push(path)
           }}
         >초기화</Button>
+        <div className="ml-auto">
+          <ExportButton href={exportHref} />
+        </div>
       </div>
 
       {uniqueDates.length > 1 && !date && (
@@ -67,18 +104,65 @@ export function PositionViewer({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>날짜</TableHead>
-              <TableHead>종목</TableHead>
+              <SortableTh<SortKey>
+                label="날짜"
+                sortKey="date"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+              />
+              <SortableTh<SortKey>
+                label="종목"
+                sortKey="code"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+              />
               <TableHead>이름</TableHead>
-              <TableHead className="text-right">수량</TableHead>
-              <TableHead className="text-right">평단가</TableHead>
-              <TableHead className="text-right">현재가</TableHead>
-              <TableHead className="text-right">평가손익</TableHead>
-              <TableHead className="text-right">비중</TableHead>
+              <SortableTh<SortKey>
+                label="수량"
+                sortKey="quantity"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+                className="text-right"
+              />
+              <SortableTh<SortKey>
+                label="평단가"
+                sortKey="avg_price"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+                className="text-right"
+              />
+              <SortableTh<SortKey>
+                label="현재가"
+                sortKey="current_price"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+                className="text-right"
+              />
+              <SortableTh<SortKey>
+                label="평가손익"
+                sortKey="unrealized_pnl"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+                className="text-right"
+              />
+              <SortableTh<SortKey>
+                label="비중"
+                sortKey="weight"
+                currentSort={sort.col}
+                currentDir={sort.dir}
+                onSort={onSort}
+                className="text-right"
+              />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {positions.map((p, i) => (
+            {sorted.map((p, i) => (
               <TableRow key={`${p.date}-${p.code}-${i}`}>
                 <TableCell>{p.date}</TableCell>
                 <TableCell className="font-mono">{p.code}</TableCell>

@@ -32,7 +32,7 @@ export default async function TradesPage({ params, searchParams }: Props) {
     return (
       <div className="space-y-6">
         <h1 className="text-2xl font-semibold">거래 이력 — {run.name || runId.slice(0, 8)}</h1>
-        <TradesTable trades={trades.items} initialFilters={sp} />
+        <TradesTable runId={runId} trades={trades.items} initialFilters={sp} />
       </div>
     )
   } catch (e) {
