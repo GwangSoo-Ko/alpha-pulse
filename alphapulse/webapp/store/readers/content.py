@@ -107,10 +107,28 @@ class ContentReader:
 
     def __init__(self, reports_dir: Path | str) -> None:
         self.reports_dir = Path(reports_dir)
+        self._scan_cache: list[ReportMeta] | None = None
+        self._scan_cache_mtime: float | None = None
 
     def _scan(self) -> list[ReportMeta]:
         if not self.reports_dir.is_dir():
+            # 디렉터리 없음 → 캐시 무효화 + 빈 반환
+            self._scan_cache = None
+            self._scan_cache_mtime = None
             return []
+
+        try:
+            dir_mtime = self.reports_dir.stat().st_mtime
+        except OSError:
+            dir_mtime = None
+
+        if (
+            self._scan_cache is not None
+            and dir_mtime is not None
+            and self._scan_cache_mtime == dir_mtime
+        ):
+            return self._scan_cache
+
         metas: list[ReportMeta] = []
         for entry in self.reports_dir.iterdir():
             if not entry.is_file():
@@ -120,6 +138,9 @@ class ContentReader:
             if entry.name.startswith("."):
                 continue
             metas.append(_meta_from_file(entry))
+
+        self._scan_cache = metas
+        self._scan_cache_mtime = dir_mtime
         return metas
 
     def list_reports(
