@@ -191,3 +191,42 @@ def test_get_signal_breakdown_null_when_all_unevaluated(evaluator, store):
     assert result[0]["hit_rate_1d"] is None
     assert result[0]["hit_rate_3d"] is None
     assert result[0]["hit_rate_5d"] is None
+
+
+def test_evaluator_caches_store_get_recent(evaluator, store, monkeypatch):
+    """동일 limit 으로 get_* 메서드 여러 번 호출 시 store.get_recent 은 1회만 호출."""
+    _seed_data(store, 5)
+    call_count = {"n": 0}
+    original = store.get_recent
+
+    def counting(*args, **kwargs):
+        call_count["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, "get_recent", counting)
+
+    evaluator.get_hit_rates(days=30)
+    evaluator.get_hit_rates(days=30)   # cache hit
+    evaluator.get_correlation(days=30)  # cache hit (same limit)
+    evaluator.get_hit_rate_trend(days=30)  # cache hit
+
+    assert call_count["n"] == 1
+
+
+def test_evaluator_cache_separate_per_limit(evaluator, store, monkeypatch):
+    """다른 limit 은 별도 캐시 키로 동작한다."""
+    _seed_data(store, 30)
+    call_count = {"n": 0}
+    original = store.get_recent
+
+    def counting(*args, **kwargs):
+        call_count["n"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(store, "get_recent", counting)
+
+    evaluator.get_hit_rates(days=7)
+    evaluator.get_hit_rates(days=30)
+    evaluator.get_hit_rates(days=7)   # cache hit for limit=7
+
+    assert call_count["n"] == 2  # 7일과 30일 각 1회

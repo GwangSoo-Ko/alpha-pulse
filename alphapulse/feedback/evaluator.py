@@ -21,10 +21,18 @@ class FeedbackEvaluator:
             from alphapulse.core.config import Config
             cfg = Config()
             self.store = FeedbackStore(db_path or (cfg.DATA_DIR / "feedback.db"))
+        # Request-scoped cache: limit → records. 인스턴스 생명주기 = request.
+        self._records_cache: dict[int, list[dict]] = {}
+
+    def _get_cached_records(self, limit: int) -> list[dict]:
+        """store.get_recent(limit=limit) 결과를 인스턴스 캐시로 재사용."""
+        if limit not in self._records_cache:
+            self._records_cache[limit] = self.store.get_recent(limit=limit)
+        return self._records_cache[limit]
 
     def get_hit_rates(self, days: int = 30) -> dict:
         """기간별 적중률 계산."""
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         evaluated = [r for r in records if r["hit_1d"] is not None]
 
         if not evaluated:
@@ -49,7 +57,7 @@ class FeedbackEvaluator:
 
     def get_indicator_accuracy(self, days: int = 30, threshold: float = 50.0) -> dict:
         """지표별 극단값 적중률. 각 지표가 ±threshold 이상일 때 시장 방향 적중률."""
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         evaluated = [r for r in records if r["hit_1d"] is not None and r["indicator_scores"]]
 
         result: dict[str, dict[str, Any]] = {}
@@ -82,7 +90,7 @@ class FeedbackEvaluator:
 
     def get_correlation(self, days: int = 30) -> float | None:
         """시그널 강도 vs 1일 수익률 Pearson 상관계수."""
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         pairs = [
             (r["score"], r["return_1d"])
             for r in records
@@ -104,7 +112,7 @@ class FeedbackEvaluator:
 
         Returns: [{date, score, return_1d, signal}]
         """
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         return [
             {
                 "date": r["date"],
@@ -124,7 +132,7 @@ class FeedbackEvaluator:
 
         Returns: [{date, indicator, score}]
         """
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         cells: list[dict] = []
         for record in records:
             raw = record["indicator_scores"]
@@ -156,7 +164,7 @@ class FeedbackEvaluator:
         Returns: [{signal, count, hit_rate_1d, hit_rate_3d, hit_rate_5d}]
         """
         from collections import defaultdict
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         groups: dict[str, list[dict]] = defaultdict(list)
         for r in records:
             groups[r["signal"]].append(r)
@@ -186,7 +194,7 @@ class FeedbackEvaluator:
         Returns:
             [{date, rolling_hit_rate_1d}] — window 내 평가 0건이면 None.
         """
-        records = self.store.get_recent(limit=days)
+        records = self._get_cached_records(days)
         # DESC → ASC
         records_asc = list(reversed(records))
         result: list[dict] = []
