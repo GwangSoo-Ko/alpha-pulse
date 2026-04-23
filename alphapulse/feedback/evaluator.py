@@ -113,6 +113,69 @@ class FeedbackEvaluator:
         Returns: [{date, score, return_1d, signal}]
         """
         records = self._get_cached_records(days)
+        return self._compute_score_return_points(records)
+
+    def get_indicator_heatmap(self, days: int = 30) -> list[dict]:
+        """각 (date, indicator) 별 score flat list. None 은 skip.
+
+        indicator_scores 는 JSON 문자열 또는 이미 dict.
+        파싱 실패 시 해당 record 전체 skip (로그 warning).
+
+        Returns: [{date, indicator, score}]
+        """
+        records = self._get_cached_records(days)
+        return self._compute_indicator_heatmap(records)
+
+    def get_signal_breakdown(self, days: int = 30) -> list[dict]:
+        """signal 값 기준 group by. count + hit_rate (1d/3d/5d) 평균.
+
+        Returns: [{signal, count, hit_rate_1d, hit_rate_3d, hit_rate_5d}]
+        """
+        records = self._get_cached_records(days)
+        return self._compute_signal_breakdown(records)
+
+    def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
+        """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
+
+        Args:
+            days: 조회 기간 (최대 레코드 수).
+            window: rolling window 일수.
+
+        Returns:
+            [{date, rolling_hit_rate_1d}] — window 내 평가 0건이면 None.
+        """
+        records = self._get_cached_records(days)
+        return self._compute_hit_rate_trend(records, window)
+
+    def get_all_analytics(self, days: int = 30, *, window: int = 7) -> dict:
+        """4개 분석 데이터셋을 단일 get_recent 호출로 생성한다.
+
+        /api/v1/feedback/analytics 전용. 기존 4 메서드와 동등한 결과 반환.
+        """
+        records = self._get_cached_records(days)
+        return {
+            "hit_rate_trend": self._compute_hit_rate_trend(records, window),
+            "score_return_points": self._compute_score_return_points(records),
+            "indicator_heatmap": self._compute_indicator_heatmap(records),
+            "signal_breakdown": self._compute_signal_breakdown(records),
+        }
+
+    @staticmethod
+    def _compute_hit_rate_trend(records: list[dict], window: int) -> list[dict]:
+        records_asc = list(reversed(records))
+        result: list[dict] = []
+        for i in range(len(records_asc)):
+            win = records_asc[max(0, i - window + 1): i + 1]
+            evaluated = [r["hit_1d"] for r in win if r["hit_1d"] is not None]
+            avg = round(sum(evaluated) / len(evaluated), 4) if evaluated else None
+            result.append({
+                "date": records_asc[i]["date"],
+                "rolling_hit_rate_1d": avg,
+            })
+        return result
+
+    @staticmethod
+    def _compute_score_return_points(records: list[dict]) -> list[dict]:
         return [
             {
                 "date": r["date"],
@@ -124,24 +187,17 @@ class FeedbackEvaluator:
             if r["return_1d"] is not None
         ]
 
-    def get_indicator_heatmap(self, days: int = 30) -> list[dict]:
-        """각 (date, indicator) 별 score flat list. None 은 skip.
-
-        indicator_scores 는 JSON 문자열 또는 이미 dict.
-        파싱 실패 시 해당 record 전체 skip (로그 warning).
-
-        Returns: [{date, indicator, score}]
-        """
-        records = self._get_cached_records(days)
+    @staticmethod
+    def _compute_indicator_heatmap(records: list[dict]) -> list[dict]:
         cells: list[dict] = []
         for record in records:
             raw = record["indicator_scores"]
             try:
-                scores = (
-                    json.loads(raw) if isinstance(raw, str) else raw
-                )
+                scores = json.loads(raw) if isinstance(raw, str) else raw
             except (json.JSONDecodeError, TypeError):
-                logger.warning("indicator_heatmap: skip %s — JSON parse fail", record["date"])
+                logger.warning(
+                    "indicator_heatmap: skip %s — JSON parse fail", record["date"]
+                )
                 continue
             if not isinstance(scores, dict):
                 continue
@@ -158,13 +214,10 @@ class FeedbackEvaluator:
                     continue
         return cells
 
-    def get_signal_breakdown(self, days: int = 30) -> list[dict]:
-        """signal 값 기준 group by. count + hit_rate (1d/3d/5d) 평균.
-
-        Returns: [{signal, count, hit_rate_1d, hit_rate_3d, hit_rate_5d}]
-        """
+    @staticmethod
+    def _compute_signal_breakdown(records: list[dict]) -> list[dict]:
         from collections import defaultdict
-        records = self._get_cached_records(days)
+
         groups: dict[str, list[dict]] = defaultdict(list)
         for r in records:
             groups[r["signal"]].append(r)
@@ -183,27 +236,3 @@ class FeedbackEvaluator:
             }
             for signal, group in groups.items()
         ]
-
-    def get_hit_rate_trend(self, days: int = 30, window: int = 7) -> list[dict]:
-        """날짜 ASC. 각 시점 기준 최근 window 일 hit_1d 이동평균.
-
-        Args:
-            days: 조회 기간 (최대 레코드 수).
-            window: rolling window 일수.
-
-        Returns:
-            [{date, rolling_hit_rate_1d}] — window 내 평가 0건이면 None.
-        """
-        records = self._get_cached_records(days)
-        # DESC → ASC
-        records_asc = list(reversed(records))
-        result: list[dict] = []
-        for i in range(len(records_asc)):
-            window_records = records_asc[max(0, i - window + 1): i + 1]
-            evaluated = [r["hit_1d"] for r in window_records if r["hit_1d"] is not None]
-            avg = round(sum(evaluated) / len(evaluated), 4) if evaluated else None
-            result.append({
-                "date": records_asc[i]["date"],
-                "rolling_hit_rate_1d": avg,
-            })
-        return result
