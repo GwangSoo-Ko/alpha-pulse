@@ -148,3 +148,31 @@ async def test_job_without_notification_store_no_crash(jobs):
     await runner_no_notif.run(jid, work)
     j = jobs.get(jid)
     assert j.status == "done"
+
+
+async def test_job_done_resilient_to_notification_store_error(
+    jobs, monkeypatch, webapp_db,
+):
+    """notification_store.add가 예외를 던져도 Job 은 'done' 으로 지속된다."""
+    from alphapulse.webapp.store.notifications import NotificationStore
+
+    store = NotificationStore(db_path=webapp_db)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("store broken")
+
+    monkeypatch.setattr(store, "add", boom)
+    runner = JobRunner(job_repo=jobs, notification_store=store)
+
+    jid = str(uuid.uuid4())
+    jobs.create(
+        job_id=jid, kind="backtest", params={}, user_id=1,
+    )
+
+    def work(*, progress_callback):
+        return "ok"
+
+    await runner.run(jid, work)
+    j = jobs.get(jid)
+    assert j.status == "done"
+    assert j.result_ref == "ok"
