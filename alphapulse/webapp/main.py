@@ -89,7 +89,7 @@ def create_app(
     login_attempts = LoginAttemptsRepository(db_path=db_path)
     notification_store = NotificationStore(db_path=db_path)
     jobs = JobRepository(db_path=db_path)
-    job_runner = JobRunner(job_repo=jobs)
+    job_runner = JobRunner(job_repo=jobs, notification_store=notification_store)
     bt_reader = BacktestReader(db_path=resolved_backtest_db)
 
     # Phase 2: readers / services

@@ -5,6 +5,7 @@ import pytest
 
 from alphapulse.webapp.jobs.runner import JobRunner, recover_orphans
 from alphapulse.webapp.store.jobs import JobRepository
+from alphapulse.webapp.store.notifications import NotificationStore
 
 
 @pytest.fixture
@@ -78,3 +79,72 @@ def test_recover_orphans(webapp_db):
     j = jobs.get(jid)
     assert j.status == "failed"
     assert j.error is not None
+
+
+@pytest.fixture
+def notif_store(webapp_db):
+    return NotificationStore(db_path=webapp_db)
+
+
+@pytest.fixture
+def runner_with_notif(jobs, notif_store):
+    return JobRunner(job_repo=jobs, notification_store=notif_store)
+
+
+async def test_job_done_emits_notification(
+    jobs, runner_with_notif, notif_store,
+):
+    jid = str(uuid.uuid4())
+    jobs.create(
+        job_id=jid, kind="backtest",
+        params={"date": "20260420"}, user_id=1,
+    )
+
+    def work(*, progress_callback):
+        return "ok"
+
+    await runner_with_notif.run(jid, work)
+    rows = notif_store.list_recent()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "job"
+    assert rows[0]["level"] == "info"
+    assert "완료" in rows[0]["title"]
+    assert f"/backtest/jobs/{jid}" in (rows[0]["link"] or "")
+
+
+async def test_job_failed_emits_notification(
+    jobs, runner_with_notif, notif_store,
+):
+    jid = str(uuid.uuid4())
+    jobs.create(
+        job_id=jid, kind="briefing",
+        params={"date": "20260420"}, user_id=1,
+    )
+
+    def boom(*, progress_callback):
+        raise RuntimeError("kaboom")
+
+    await runner_with_notif.run(jid, boom)
+    rows = notif_store.list_recent()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == "job"
+    assert rows[0]["level"] == "error"
+    assert "실패" in rows[0]["title"]
+    assert "RuntimeError" in (rows[0]["body"] or "")
+
+
+async def test_job_without_notification_store_no_crash(jobs):
+    """notification_store=None 이어도 기존 동작 유지."""
+    runner_no_notif = JobRunner(job_repo=jobs)
+    jid = str(uuid.uuid4())
+    jobs.create(
+        job_id=jid, kind="screening", params={}, user_id=1,
+    )
+
+    def work(*, progress_callback):
+        return "ok"
+
+    # 에러 없이 완료, notification_store 없음
+    await runner_no_notif.run(jid, work)
+    j = jobs.get(jid)
+    assert j.status == "done"
