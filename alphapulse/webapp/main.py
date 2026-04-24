@@ -23,6 +23,7 @@ from alphapulse.webapp.api.dashboard import router as dashboard_router
 from alphapulse.webapp.api.data import router as data_router
 from alphapulse.webapp.api.feedback import router as feedback_router
 from alphapulse.webapp.api.market import router as market_router
+from alphapulse.webapp.api.notifications import router as notifications_router
 from alphapulse.webapp.api.portfolio import router as portfolio_router
 from alphapulse.webapp.api.risk import router as risk_router
 from alphapulse.webapp.api.screening import router as screening_router
@@ -38,6 +39,7 @@ from alphapulse.webapp.notifier import MonitorNotifier
 from alphapulse.webapp.store.alert_log import AlertLogRepository
 from alphapulse.webapp.store.jobs import JobRepository
 from alphapulse.webapp.store.login_attempts import LoginAttemptsRepository
+from alphapulse.webapp.store.notifications import NotificationStore
 from alphapulse.webapp.store.readers.audit import AuditReader
 from alphapulse.webapp.store.readers.backtest import BacktestReader
 from alphapulse.webapp.store.readers.content import ContentReader
@@ -85,6 +87,7 @@ def create_app(
     users = UserRepository(db_path=db_path)
     sessions = SessionRepository(db_path=db_path)
     login_attempts = LoginAttemptsRepository(db_path=db_path)
+    notification_store = NotificationStore(db_path=db_path)
     jobs = JobRepository(db_path=db_path)
     job_runner = JobRunner(job_repo=jobs)
     bt_reader = BacktestReader(db_path=resolved_backtest_db)
@@ -159,6 +162,7 @@ def create_app(
     app.state.users = users
     app.state.sessions = sessions
     app.state.login_attempts = login_attempts
+    app.state.notification_store = notification_store
     app.state.jobs = jobs
     app.state.job_runner = job_runner
     app.state.backtest_reader = bt_reader
@@ -194,6 +198,7 @@ def create_app(
 
     app.include_router(auth_router)
     app.include_router(jobs_router)
+    app.include_router(notifications_router)
     app.include_router(backtest_router)
 
     # Phase 2 routers
