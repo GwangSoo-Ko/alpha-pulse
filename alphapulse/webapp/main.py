@@ -106,7 +106,10 @@ def create_app(
     screening_repo = ScreeningRepository(db_path=db_path)
     data_status_reader = DataStatusReader(trading_db_path=trading_db)
     audit_reader = AuditReader(db_path=audit_db)
-    pulse_history = PulseHistory(db_path=core.HISTORY_DB)
+    pulse_history = PulseHistory(
+        db_path=core.HISTORY_DB,
+        notification_store=notification_store,
+    )
     content_reader = ContentReader(
         reports_dir=core.REPORTS_DIR,
         fts_db_path=core.CONTENT_SEARCH_DB,

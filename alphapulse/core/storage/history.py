@@ -4,10 +4,22 @@
 시계열 추세 분석 및 리포트 생성에 활용한다.
 """
 
+from __future__ import annotations
+
 import json
+import logging
 import sqlite3
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from alphapulse.webapp.store.notifications import NotificationStore
+
+logger = logging.getLogger(__name__)
+
+# Pulse 극단값 임계치 — abs(score) 가 이 값 이상이면 알림 발행
+PULSE_EXTREME_THRESHOLD = 80.0
 
 
 class PulseHistory:
@@ -15,16 +27,23 @@ class PulseHistory:
 
     Attributes:
         db_path: SQLite 데이터베이스 파일 경로.
+        notification_store: Pulse 극단값 발생 시 알림을 발행할 저장소 (옵션).
     """
 
-    def __init__(self, db_path: Path | str) -> None:
+    def __init__(
+        self,
+        db_path: Path | str,
+        notification_store: NotificationStore | None = None,
+    ) -> None:
         """이력 DB 초기화 및 테이블 생성.
 
         Args:
             db_path: SQLite DB 파일 경로.
+            notification_store: Pulse 극단값 발생 시 알림을 발행할 저장소 (옵션).
         """
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.db_path = str(db_path)
+        self.notification_store = notification_store
         self._create_table()
 
     def _create_table(self) -> None:
@@ -69,6 +88,28 @@ class PulseHistory:
                     created_at = excluded.created_at
                 """,
                 (date, score, signal, details_json, now),
+            )
+        self._emit_extreme_notification(date, score)
+
+    def _emit_extreme_notification(self, date: str, score: float) -> None:
+        """abs(score) >= 80 이면 알림 발행 — 실패해도 save 영향 없음."""
+        if self.notification_store is None:
+            return
+        if abs(score) < PULSE_EXTREME_THRESHOLD:
+            return
+        try:
+            direction = "강세" if score > 0 else "약세"
+            sign = "+" if score > 0 else ""
+            self.notification_store.add(
+                kind="pulse",
+                level="info",
+                title=f"Pulse {direction} 극단값",
+                body=f"{date} · {sign}{score:.1f}",
+                link="/market/pulse",
+            )
+        except Exception as e:
+            logger.warning(
+                "notification add failed for pulse %s: %s", date, e,
             )
 
     def get(self, date: str) -> dict | None:
