@@ -24,8 +24,8 @@ class NotificationStore:
     def add(
         self,
         *,
-        kind: str,
-        level: str,
+        kind: NotificationKind | str,
+        level: NotificationLevel | str,
         title: str,
         body: str | None = None,
         link: str | None = None,
@@ -37,6 +37,8 @@ class NotificationStore:
         dedup_after = now - DEDUP_WINDOW_SECONDS
         with sqlite3.connect(self.db_path) as conn:
             if link is not None:
+                # Best-effort dedup: between this SELECT and INSERT there is a
+                # small race window, which is acceptable for notifications.
                 dup = conn.execute(
                     "SELECT id FROM notifications "
                     "WHERE kind = ? AND link = ? AND created_at >= ? "
