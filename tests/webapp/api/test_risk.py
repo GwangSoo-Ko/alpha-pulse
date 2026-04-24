@@ -11,6 +11,7 @@ from alphapulse.webapp.auth.security import hash_password
 from alphapulse.webapp.config import WebAppConfig
 from alphapulse.webapp.middleware.csrf import CSRFMiddleware
 from alphapulse.webapp.store.login_attempts import LoginAttemptsRepository
+from alphapulse.webapp.store.notifications import NotificationStore  # noqa: F401
 from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
 from alphapulse.webapp.store.readers.risk import RiskReader
 from alphapulse.webapp.store.risk_cache import RiskReportCacheRepository
@@ -167,3 +168,141 @@ class TestRiskAPI:
         )
         assert r.status_code == 200
         assert r.json()["results"] == {}
+
+
+class TestRiskNotifications:
+    """RiskReader.get_report 가 alerts 존재 시 notification_store.add 호출한다."""
+
+    @staticmethod
+    def _mock_report_with_alerts(alerts_msgs: list[str]):
+        """RiskReport mock with alerts."""
+        from unittest.mock import MagicMock
+        alerts = []
+        for msg in alerts_msgs:
+            a = MagicMock()
+            a.level = "WARNING"
+            a.message = msg
+            alerts.append(a)
+        report = MagicMock()
+        report.drawdown_status = "WARN"
+        report.var_95 = 0.0
+        report.cvar_95 = 0.0
+        report.alerts = alerts
+        return report
+
+    def test_alerts_emit_notification_on_fresh_compute(self, webapp_db):
+        from unittest.mock import patch
+
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        mock_portfolio = MagicMock()
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=1_000_000, total_value=50_000_000,
+            daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        report_with_alerts = self._mock_report_with_alerts(
+            ["Drawdown SOFT 초과: -30%"],
+        )
+        with patch(
+            "alphapulse.webapp.store.readers.risk.RiskManager",
+        ) as MgrCls:
+            MgrCls.return_value.daily_report.return_value = report_with_alerts
+            result = reader.get_report(mode="paper")
+
+        assert result is not None
+        alerts = result["report"]["alerts"]
+        assert len(alerts) == 1
+        assert notif_store.add.call_count == 1
+        first_call = notif_store.add.call_args_list[0]
+        assert first_call.kwargs["kind"] == "risk"
+        assert first_call.kwargs["level"] == "warn"
+        assert first_call.kwargs["link"] == "/risk"
+        assert "Drawdown" in (first_call.kwargs["body"] or "")
+
+    def test_no_alerts_no_notification(self, webapp_db):
+        """alert 없으면 notification_store.add 호출되지 않는다 — 기본 시나리오 그대로."""
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        mock_portfolio = MagicMock()
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=10_000_000, total_value=100_000_000,
+            daily_return=0.5, cumulative_return=2.0, drawdown=-1.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+        reader.get_report(mode="paper")
+        notif_store.add.assert_not_called()
+
+    def test_cached_report_no_emit(self, webapp_db):
+        """캐시 히트 경로에서는 notification_store.add 호출되지 않는다."""
+        from unittest.mock import patch
+
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        mock_portfolio = MagicMock()
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=1_000_000, total_value=50_000_000,
+            daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        report_with_alerts = self._mock_report_with_alerts(["alert 1"])
+        with patch(
+            "alphapulse.webapp.store.readers.risk.RiskManager",
+        ) as MgrCls:
+            MgrCls.return_value.daily_report.return_value = report_with_alerts
+            reader.get_report(mode="paper")
+            first_count = notif_store.add.call_count
+            assert first_count == 1
+
+            reader.get_report(mode="paper")
+            assert notif_store.add.call_count == first_count
+
+    def test_resilient_to_notification_error(self, webapp_db):
+        """notification_store.add 가 예외 내도 get_report 는 정상 반환."""
+        from unittest.mock import patch
+
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        notif_store.add.side_effect = RuntimeError("notif broken")
+        mock_portfolio = MagicMock()
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=1_000_000, total_value=50_000_000,
+            daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        report_with_alerts = self._mock_report_with_alerts(["alert x"])
+        with patch(
+            "alphapulse.webapp.store.readers.risk.RiskManager",
+        ) as MgrCls:
+            MgrCls.return_value.daily_report.return_value = report_with_alerts
+            result = reader.get_report(mode="paper")
+
+        assert result is not None
+        assert "report" in result

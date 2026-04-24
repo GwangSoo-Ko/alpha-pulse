@@ -17,7 +17,7 @@ class TestInitWebAppDb:
         names = {r[0] for r in rows}
         assert names == {
             "users", "sessions", "jobs", "login_attempts", "alert_log", "settings",
-            "risk_report_cache", "screening_runs",
+            "risk_report_cache", "screening_runs", "notifications",
         }
 
     def test_users_has_tenant_id_column(self, tmp_path):

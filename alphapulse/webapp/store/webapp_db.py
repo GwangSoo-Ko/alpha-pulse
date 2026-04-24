@@ -119,6 +119,22 @@ CREATE TABLE IF NOT EXISTS screening_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_screening_user
     ON screening_runs(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    level TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    link TEXT,
+    created_at REAL NOT NULL,
+    is_read INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at
+    ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_unread
+    ON notifications(is_read, created_at DESC)
+    WHERE is_read = 0;
 """
 
 

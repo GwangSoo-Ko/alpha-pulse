@@ -235,3 +235,93 @@ class TestPulseHistory:
         assert result is not None
         assert result["details"]["investor_flow"]["score"] == 42.0
         assert result["details"]["investor_flow"]["details"] == "raw"
+
+
+class TestPulseHistoryNotifications:
+    """PulseHistory — score ±80 이상 극단값 시 알림 발행."""
+
+    @pytest.fixture
+    def history_with_notif(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from alphapulse.core.storage.history import PulseHistory
+        notif_store = MagicMock()
+        hist = PulseHistory(
+            db_path=tmp_path / "test_hist.db",
+            notification_store=notif_store,
+        )
+        return hist, notif_store
+
+    def test_score_above_80_emits_strong_bull(self, history_with_notif):
+        hist, notif_store = history_with_notif
+        hist.save(
+            date="20260420", score=85.2, signal="강한 매수", details={},
+        )
+        assert notif_store.add.call_count == 1
+        call = notif_store.add.call_args
+        assert call.kwargs["kind"] == "pulse"
+        assert call.kwargs["level"] == "info"
+        assert "강세" in call.kwargs["title"]
+        assert "20260420" in (call.kwargs["body"] or "")
+        assert call.kwargs["link"] == "/market/pulse"
+
+    def test_score_below_minus_80_emits_strong_bear(self, history_with_notif):
+        hist, notif_store = history_with_notif
+        hist.save(
+            date="20260420", score=-85.2, signal="강한 매도", details={},
+        )
+        assert notif_store.add.call_count == 1
+        call = notif_store.add.call_args
+        assert call.kwargs["kind"] == "pulse"
+        assert "약세" in call.kwargs["title"]
+
+    def test_score_at_exact_80_emits(self, history_with_notif):
+        hist, notif_store = history_with_notif
+        hist.save(
+            date="20260420", score=80.0, signal="매수", details={},
+        )
+        assert notif_store.add.call_count == 1
+
+    def test_score_at_exact_minus_80_emits(self, history_with_notif):
+        hist, notif_store = history_with_notif
+        hist.save(
+            date="20260420", score=-80.0, signal="매도", details={},
+        )
+        assert notif_store.add.call_count == 1
+
+    def test_score_below_threshold_no_emit(self, history_with_notif):
+        hist, notif_store = history_with_notif
+        hist.save(
+            date="20260420", score=40.0, signal="중립", details={},
+        )
+        hist.save(
+            date="20260421", score=-79.9, signal="약한 매도", details={},
+        )
+        notif_store.add.assert_not_called()
+
+    def test_no_notification_store_no_crash(self, tmp_path):
+        from alphapulse.core.storage.history import PulseHistory
+        hist = PulseHistory(db_path=tmp_path / "test_hist.db")
+        # 에러 없이 저장
+        hist.save(
+            date="20260420", score=95.0, signal="강한 매수", details={},
+        )
+        assert hist.get("20260420") is not None
+
+    def test_resilient_to_notification_error(self, tmp_path):
+        """notification_store.add 가 예외 내도 save 는 정상 수행된다."""
+        from unittest.mock import MagicMock
+
+        from alphapulse.core.storage.history import PulseHistory
+        notif_store = MagicMock()
+        notif_store.add.side_effect = RuntimeError("notif broken")
+        hist = PulseHistory(
+            db_path=tmp_path / "test_hist.db",
+            notification_store=notif_store,
+        )
+        # 예외 bubble 되지 않아야 함
+        hist.save(
+            date="20260420", score=95.0, signal="강한 매수", details={},
+        )
+        # 저장 확인
+        assert hist.get("20260420") is not None
