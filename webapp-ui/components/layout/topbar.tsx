@@ -1,7 +1,8 @@
 "use client"
-import { apiMutate } from "@/lib/api-client"
-import { Button } from "@/components/ui/button"
 import { ModeSelector } from "@/components/layout/mode-selector"
+import { NotificationBell } from "@/components/layout/notification-bell"
+import { Button } from "@/components/ui/button"
+import { apiMutate } from "@/lib/api-client"
 import type { User } from "@/lib/types"
 
 export function Topbar({ user }: { user: User }) {
@@ -15,6 +16,7 @@ export function Topbar({ user }: { user: User }) {
         <ModeSelector />
       </div>
       <div className="flex items-center gap-3 text-sm">
+        <NotificationBell />
         <span className="text-neutral-400">{user.email}</span>
         <Button size="sm" variant="outline" onClick={handleLogout}>
           Logout
