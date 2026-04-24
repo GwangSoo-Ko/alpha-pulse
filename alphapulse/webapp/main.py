@@ -98,7 +98,11 @@ def create_app(
 
     portfolio_reader = PortfolioReader(db_path=db_path)
     risk_cache = RiskReportCacheRepository(db_path=db_path)
-    risk_reader = RiskReader(portfolio_reader=portfolio_reader, cache=risk_cache)
+    risk_reader = RiskReader(
+        portfolio_reader=portfolio_reader,
+        cache=risk_cache,
+        notification_store=notification_store,
+    )
     screening_repo = ScreeningRepository(db_path=db_path)
     data_status_reader = DataStatusReader(trading_db_path=trading_db)
     audit_reader = AuditReader(db_path=audit_db)

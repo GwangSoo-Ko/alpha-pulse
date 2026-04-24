@@ -11,6 +11,7 @@ from alphapulse.webapp.auth.security import hash_password
 from alphapulse.webapp.config import WebAppConfig
 from alphapulse.webapp.middleware.csrf import CSRFMiddleware
 from alphapulse.webapp.store.login_attempts import LoginAttemptsRepository
+from alphapulse.webapp.store.notifications import NotificationStore  # noqa: F401
 from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
 from alphapulse.webapp.store.readers.risk import RiskReader
 from alphapulse.webapp.store.risk_cache import RiskReportCacheRepository
@@ -167,3 +168,107 @@ class TestRiskAPI:
         )
         assert r.status_code == 200
         assert r.json()["results"] == {}
+
+
+class TestRiskNotifications:
+    """RiskReader.get_report 가 alerts 존재 시 notification_store.add 호출한다."""
+
+    def test_alerts_emit_notification_on_fresh_compute(self, webapp_db):
+        """캐시 미스 + alert 발생 시 notification_store.add 호출."""
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        mock_portfolio = MagicMock()
+        # drawdown -30% → HARD limit 초과로 alert 발생
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=1_000_000, total_value=50_000_000,
+            daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        result = reader.get_report(mode="paper")
+        assert result is not None
+        alerts = result["report"]["alerts"]
+        assert len(alerts) > 0
+
+        # 각 alert 마다 add 호출 시도 (dedup 은 저장소 레벨, add 자체는 호출됨)
+        assert notif_store.add.call_count >= 1
+        first_call = notif_store.add.call_args_list[0]
+        assert first_call.kwargs["kind"] == "risk"
+        assert first_call.kwargs["level"] == "warn"
+        assert first_call.kwargs["link"] == "/risk"
+
+    def test_no_alerts_no_notification(self, webapp_db):
+        """alert 없으면 notification_store.add 는 호출되지 않는다."""
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        mock_portfolio = MagicMock()
+        # 정상 상태 — drawdown -1% (HARD/SOFT limit 미달)
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=10_000_000, total_value=100_000_000,
+            daily_return=0.5, cumulative_return=2.0, drawdown=-1.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        reader.get_report(mode="paper")
+        notif_store.add.assert_not_called()
+
+    def test_cached_report_no_emit(self, webapp_db):
+        """캐시 히트 경로에서는 notification_store.add 호출되지 않는다."""
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        mock_portfolio = MagicMock()
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=1_000_000, total_value=50_000_000,
+            daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        # 첫 호출 — 캐시 미스, emit 발생
+        reader.get_report(mode="paper")
+        first_count = notif_store.add.call_count
+        assert first_count >= 1
+
+        # 두 번째 호출 — 캐시 히트, add 카운트 증가 없음
+        reader.get_report(mode="paper")
+        assert notif_store.add.call_count == first_count
+
+    def test_resilient_to_notification_error(self, webapp_db):
+        """notification_store.add 가 예외 내도 get_report 는 정상 반환."""
+        from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
+
+        notif_store = MagicMock()
+        notif_store.add.side_effect = RuntimeError("notif broken")
+        mock_portfolio = MagicMock()
+        mock_portfolio.get_latest.return_value = SnapshotDTO(
+            date="20260420", cash=1_000_000, total_value=50_000_000,
+            daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
+            positions=[],
+        )
+        cache = RiskReportCacheRepository(db_path=webapp_db)
+        reader = RiskReader(
+            portfolio_reader=mock_portfolio, cache=cache,
+            notification_store=notif_store,
+        )
+
+        # 예외 bubble 되지 않아야 함
+        result = reader.get_report(mode="paper")
+        assert result is not None
+        assert "report" in result
