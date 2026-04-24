@@ -173,13 +173,30 @@ class TestRiskAPI:
 class TestRiskNotifications:
     """RiskReader.get_report 가 alerts 존재 시 notification_store.add 호출한다."""
 
+    @staticmethod
+    def _mock_report_with_alerts(alerts_msgs: list[str]):
+        """RiskReport mock with alerts."""
+        from unittest.mock import MagicMock
+        alerts = []
+        for msg in alerts_msgs:
+            a = MagicMock()
+            a.level = "WARNING"
+            a.message = msg
+            alerts.append(a)
+        report = MagicMock()
+        report.drawdown_status = "WARN"
+        report.var_95 = 0.0
+        report.cvar_95 = 0.0
+        report.alerts = alerts
+        return report
+
     def test_alerts_emit_notification_on_fresh_compute(self, webapp_db):
-        """캐시 미스 + alert 발생 시 notification_store.add 호출."""
+        from unittest.mock import patch
+
         from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
 
         notif_store = MagicMock()
         mock_portfolio = MagicMock()
-        # drawdown -30% → HARD limit 초과로 alert 발생
         mock_portfolio.get_latest.return_value = SnapshotDTO(
             date="20260420", cash=1_000_000, total_value=50_000_000,
             daily_return=-2.0, cumulative_return=-30.0, drawdown=-30.0,
@@ -191,25 +208,31 @@ class TestRiskNotifications:
             notification_store=notif_store,
         )
 
-        result = reader.get_report(mode="paper")
+        report_with_alerts = self._mock_report_with_alerts(
+            ["Drawdown SOFT 초과: -30%"],
+        )
+        with patch(
+            "alphapulse.webapp.store.readers.risk.RiskManager",
+        ) as MgrCls:
+            MgrCls.return_value.daily_report.return_value = report_with_alerts
+            result = reader.get_report(mode="paper")
+
         assert result is not None
         alerts = result["report"]["alerts"]
-        assert len(alerts) > 0
-
-        # 각 alert 마다 add 호출 시도 (dedup 은 저장소 레벨, add 자체는 호출됨)
-        assert notif_store.add.call_count >= 1
+        assert len(alerts) == 1
+        assert notif_store.add.call_count == 1
         first_call = notif_store.add.call_args_list[0]
         assert first_call.kwargs["kind"] == "risk"
         assert first_call.kwargs["level"] == "warn"
         assert first_call.kwargs["link"] == "/risk"
+        assert "Drawdown" in (first_call.kwargs["body"] or "")
 
     def test_no_alerts_no_notification(self, webapp_db):
-        """alert 없으면 notification_store.add 는 호출되지 않는다."""
+        """alert 없으면 notification_store.add 호출되지 않는다 — 기본 시나리오 그대로."""
         from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
 
         notif_store = MagicMock()
         mock_portfolio = MagicMock()
-        # 정상 상태 — drawdown -1% (HARD/SOFT limit 미달)
         mock_portfolio.get_latest.return_value = SnapshotDTO(
             date="20260420", cash=10_000_000, total_value=100_000_000,
             daily_return=0.5, cumulative_return=2.0, drawdown=-1.0,
@@ -220,12 +243,13 @@ class TestRiskNotifications:
             portfolio_reader=mock_portfolio, cache=cache,
             notification_store=notif_store,
         )
-
         reader.get_report(mode="paper")
         notif_store.add.assert_not_called()
 
     def test_cached_report_no_emit(self, webapp_db):
         """캐시 히트 경로에서는 notification_store.add 호출되지 않는다."""
+        from unittest.mock import patch
+
         from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
 
         notif_store = MagicMock()
@@ -241,17 +265,22 @@ class TestRiskNotifications:
             notification_store=notif_store,
         )
 
-        # 첫 호출 — 캐시 미스, emit 발생
-        reader.get_report(mode="paper")
-        first_count = notif_store.add.call_count
-        assert first_count >= 1
+        report_with_alerts = self._mock_report_with_alerts(["alert 1"])
+        with patch(
+            "alphapulse.webapp.store.readers.risk.RiskManager",
+        ) as MgrCls:
+            MgrCls.return_value.daily_report.return_value = report_with_alerts
+            reader.get_report(mode="paper")
+            first_count = notif_store.add.call_count
+            assert first_count == 1
 
-        # 두 번째 호출 — 캐시 히트, add 카운트 증가 없음
-        reader.get_report(mode="paper")
-        assert notif_store.add.call_count == first_count
+            reader.get_report(mode="paper")
+            assert notif_store.add.call_count == first_count
 
     def test_resilient_to_notification_error(self, webapp_db):
         """notification_store.add 가 예외 내도 get_report 는 정상 반환."""
+        from unittest.mock import patch
+
         from alphapulse.webapp.store.readers.portfolio import SnapshotDTO
 
         notif_store = MagicMock()
@@ -268,7 +297,12 @@ class TestRiskNotifications:
             notification_store=notif_store,
         )
 
-        # 예외 bubble 되지 않아야 함
-        result = reader.get_report(mode="paper")
+        report_with_alerts = self._mock_report_with_alerts(["alert x"])
+        with patch(
+            "alphapulse.webapp.store.readers.risk.RiskManager",
+        ) as MgrCls:
+            MgrCls.return_value.daily_report.return_value = report_with_alerts
+            result = reader.get_report(mode="paper")
+
         assert result is not None
         assert "report" in result

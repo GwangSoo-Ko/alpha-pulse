@@ -65,38 +65,17 @@ class RiskReader:
         snap_obj = self._to_snapshot(snap)
         report = mgr.daily_report(snap_obj)
         stress_raw = StressTest().run_all(snap_obj)
-        # StressResult dataclass → serializable dict
         stress = {
             name: asdict(result) for name, result in stress_raw.items()
         }
-        alerts_list = [
-            {"level": a.level, "message": a.message}
-            for a in (report.alerts or [])
-        ]
-        # 드로다운 기반 alert — daily_report 는 섹터 집중도만 포함하므로
-        # portfolio.drawdown 필드를 limits 에 대해 직접 검사해 보강한다.
-        dd_abs = abs(snap.drawdown) / 100.0
-        if dd_abs >= limits.max_drawdown_hard:
-            alerts_list.append({
-                "level": "CRITICAL",
-                "message": (
-                    f"드로다운 한도 초과: {abs(snap.drawdown):.1f}% "
-                    f"(하드 한도: {limits.max_drawdown_hard * 100:.1f}%)"
-                ),
-            })
-        elif dd_abs >= limits.max_drawdown_soft:
-            alerts_list.append({
-                "level": "WARNING",
-                "message": (
-                    f"드로다운 경고: {abs(snap.drawdown):.1f}% "
-                    f"(소프트 한도: {limits.max_drawdown_soft * 100:.1f}%)"
-                ),
-            })
         report_dict = {
             "drawdown_status": report.drawdown_status,
             "var_95": report.var_95,
             "cvar_95": report.cvar_95,
-            "alerts": alerts_list,
+            "alerts": [
+                {"level": a.level, "message": a.message}
+                for a in (report.alerts or [])
+            ],
         }
         self.cache.put(key=key, report=report_dict, stress=stress)
         self._emit_alert_notifications(report_dict.get("alerts", []))
