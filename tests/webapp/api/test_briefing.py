@@ -39,6 +39,7 @@ def app(webapp_db, briefing_store):
     app.state.jobs = JobRepository(db_path=webapp_db)
     app.state.job_runner = JobRunner(job_repo=app.state.jobs)
     app.state.briefing_store = briefing_store
+    app.state.notification_store = MagicMock()
     app.state.audit = MagicMock()
     app.state.users.create(
         email="a@x.com",

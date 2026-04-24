@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from alphapulse.core.config import Config
 from alphapulse.core.notifier import TelegramNotifier
@@ -11,18 +12,26 @@ from alphapulse.core.storage import DataCache, PulseHistory
 from alphapulse.core.storage.briefings import BriefingStore
 from alphapulse.market.engine.signal_engine import SignalEngine
 
+if TYPE_CHECKING:
+    from alphapulse.webapp.store.notifications import NotificationStore
+
 logger = logging.getLogger(__name__)
 
 
 class BriefingOrchestrator:
     """정량 + 정성 + AI 해설을 조합하여 일일 브리핑을 생성한다."""
 
-    def __init__(self, reports_dir: str | None = None):
+    def __init__(
+        self,
+        reports_dir: str | None = None,
+        notification_store: "NotificationStore | None" = None,
+    ):
         self.config = Config()
         self.reports_dir = Path(reports_dir or self.config.REPORTS_DIR)
         self.config.ensure_data_dir()
         self.cache = DataCache(self.config.CACHE_DB)
         self.history = PulseHistory(self.config.HISTORY_DB)
+        self.notification_store = notification_store
 
     def run_quantitative(self, date: str | None = None) -> dict:
         """정량 파이프라인 실행 → Market Pulse Score."""
@@ -214,12 +223,35 @@ class BriefingOrchestrator:
             "post_analysis": post_analysis,
             "generated_at": datetime.now().isoformat(),
         }
+        saved_ok = False
         try:
             store = BriefingStore(self.config.BRIEFINGS_DB)
             await asyncio.to_thread(store.save, pulse_result["date"], payload)
             logger.info(f"Briefing 저장 완료: {pulse_result['date']}")
+            saved_ok = True
         except Exception as e:
             logger.warning(f"Briefing 저장 실패: {e}")
+
+        # 알림 발행 — save 성공 시에만
+        if saved_ok and self.notification_store is not None:
+            try:
+                date_str = pulse_result["date"]
+                score = pulse_result.get("score", 0.0)
+                signal = pulse_result.get("signal", "")
+                sign = "+" if score >= 0 else ""
+                body = f"{date_str} · {sign}{score:.1f} {signal}"
+                self.notification_store.add(
+                    kind="briefing",
+                    level="info",
+                    title="브리핑 생성 완료",
+                    body=body,
+                    link=f"/briefings/{date_str}",
+                )
+            except Exception as e:
+                logger.warning(
+                    f"notification add failed for briefing "
+                    f"{pulse_result['date']}: {e}",
+                )
 
         return payload
 

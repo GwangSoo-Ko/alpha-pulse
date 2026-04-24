@@ -203,6 +203,7 @@ async def run_briefing(
             job_id,
             run_briefing_async,
             date=target_date,
+            notification_store=request.app.state.notification_store,
         )
 
     background_tasks.add_task(_run)
